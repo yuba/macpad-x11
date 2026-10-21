@@ -1,0 +1,16 @@
+pkgbase = three-finger-drag
+	pkgdesc = macOS-style three-finger drag for X11 touchpads
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/yuba/three-finger-drag
+	install = three-finger-drag.install
+	arch = any
+	license = MIT
+	depends = python>=3.11
+	depends = libinput
+	depends = libxtst
+	depends = coreutils
+	source = three-finger-drag-0.1.0.tar.gz::https://github.com/yuba/three-finger-drag/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = 3218b20af06a038754c261b48db9704c00d7a8510ae25e7a5d53c3ab5772a927
+
+pkgname = three-finger-drag

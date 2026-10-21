@@ -8,7 +8,7 @@ url="https://github.com/yuba/three-finger-drag"
 license=('MIT')
 depends=('python>=3.11' 'libinput' 'libxtst' 'coreutils')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('3218b20af06a038754c261b48db9704c00d7a8510ae25e7a5d53c3ab5772a927')
 install=$pkgname.install
 
 package() {
