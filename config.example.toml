@@ -1,0 +1,17 @@
+# three-finger-drag configuration
+# Copy to ~/.config/three-finger-drag/config.toml and edit.
+# Apply changes with: systemctl --user reload three-finger-drag.service
+
+# Grace period after lifting the fingers, in seconds.
+# Put the fingers back within this time to continue the drag.
+timeout = 0.5
+
+# Ignore pointer events for this long right after the swipe ends, in seconds.
+# Raise it (e.g. 0.03) if drags end unexpectedly while lifting the fingers.
+lift_guard = 0.0
+
+# Pointer movement per unit of swipe movement.
+speed = 3.0
+
+# Number of fingers that start a drag.
+fingers = 3

@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""macOS-style three-finger drag for X11 touchpads.
+
+Reads `libinput debug-events`, presses the left button when a three-finger
+swipe begins, moves the pointer while it continues, and keeps the button held
+for a short grace period after the fingers are lifted so the drag can be
+resumed. Any one-finger motion, click or scroll during the grace period ends
+the drag immediately.
+
+The daemon must stay resident: libinput does not track touches that were
+already on the touchpad when it started.
+"""
+import ctypes
+import os
+import re
+import select
+import signal
+import subprocess
+import sys
+import time
+import tomllib
+
+__version__ = "0.1.0"
+
+DEFAULTS = {
+    # Grace period after lifting the fingers, in seconds.
+    "timeout": 0.5,
+    # Ignore pointer events for this long right after the swipe ends, in seconds.
+    "lift_guard": 0.0,
+    # Pointer movement per unit of swipe movement.
+    "speed": 3.0,
+    # Number of fingers that start a drag.
+    "fingers": 3,
+}
+
+# Events that end the drag during the grace period.
+RELEASE_EVENTS = {
+    "POINTER_MOTION",
+    "POINTER_BUTTON",
+    "POINTER_SCROLL_FINGER",
+    "POINTER_SCROLL_WHEEL",
+    "POINTER_SCROLL_CONTINUOUS",
+    "GESTURE_PINCH_BEGIN",
+}
+
+# Accelerated "dx/ dy" of GESTURE_SWIPE_UPDATE.
+DELTA_RE = re.compile(r"(-?\d+\.\d+)/\s*(-?\d+\.\d+)")
+
+
+def config_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "three-finger-drag", "config.toml")
+
+
+def load_config():
+    conf = dict(DEFAULTS)
+    path = config_path()
+    try:
+        with open(path, "rb") as f:
+            user = tomllib.load(f)
+    except FileNotFoundError:
+        return conf
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        print(f"three-finger-drag: ignoring {path}: {e}", file=sys.stderr)
+        return conf
+    for key, value in user.items():
+        if key not in DEFAULTS:
+            print(f"three-finger-drag: unknown key '{key}' in {path}", file=sys.stderr)
+        elif not isinstance(value, (int, float)) or isinstance(value, bool):
+            print(f"three-finger-drag: '{key}' must be a number in {path}", file=sys.stderr)
+        else:
+            conf[key] = value
+    return conf
+
+
+if len(sys.argv) > 1:
+    if sys.argv[1] in ("-V", "--version"):
+        print(f"three-finger-drag {__version__}")
+        sys.exit(0)
+    print(f"usage: {os.path.basename(sys.argv[0])} [--version]\n"
+          f"config: {config_path()}", file=sys.stderr)
+    sys.exit(0 if sys.argv[1] in ("-h", "--help") else 2)
+
+if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+    sys.exit("three-finger-drag: X11 only (Wayland session detected)")
+
+conf = load_config()
+
+x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+xtst = ctypes.cdll.LoadLibrary("libXtst.so.6")
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XFlush.argtypes = [ctypes.c_void_p]
+xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+xtst.XTestFakeRelativeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+dpy = x11.XOpenDisplay(None)
+if not dpy:
+    sys.exit("three-finger-drag: cannot open display (is DISPLAY set?)")
+
+IDLE, DRAGGING, GRACE = "idle", "dragging", "grace"
+state = IDLE
+grace_since = 0.0
+# Sub-pixel remainder carried over between updates.
+rest_x = rest_y = 0.0
+
+
+def button(down):
+    xtst.XTestFakeButtonEvent(dpy, 1, int(down), 0)
+    x11.XFlush(dpy)
+
+
+def move(line):
+    global rest_x, rest_y
+    m = DELTA_RE.search(line)
+    if not m:
+        return
+    rest_x += float(m.group(1)) * conf["speed"]
+    rest_y += float(m.group(2)) * conf["speed"]
+    dx, dy = int(rest_x), int(rest_y)
+    if dx or dy:
+        rest_x -= dx
+        rest_y -= dy
+        xtst.XTestFakeRelativeMotionEvent(dpy, dx, dy, 0)
+        x11.XFlush(dpy)
+
+
+def release():
+    global state
+    if state != IDLE:
+        button(False)
+    state = IDLE
+
+
+def handle(line):
+    global state, grace_since, rest_x, rest_y
+    fields = line.split()
+    if len(fields) < 2:
+        return
+    event = fields[1]
+    # The finger count follows the timestamp ("+1.234s"); UPDATE lines have a
+    # sequence number before the timestamp, so locate it by position.
+    t = next((i for i, f in enumerate(fields) if f.startswith("+") and f.endswith("s")), None)
+    fingers = fields[t + 1] if t is not None and t + 1 < len(fields) else None
+
+    if event.startswith("GESTURE_SWIPE_") and fingers == str(conf["fingers"]):
+        if event == "GESTURE_SWIPE_BEGIN":
+            if state == IDLE:
+                button(True)
+            state = DRAGGING
+            rest_x = rest_y = 0.0
+        elif event == "GESTURE_SWIPE_UPDATE" and state == DRAGGING:
+            move(line)
+        elif event == "GESTURE_SWIPE_END" and state == DRAGGING:
+            state = GRACE
+            grace_since = time.monotonic()
+        return
+
+    if state == GRACE and event in RELEASE_EVENTS and time.monotonic() - grace_since >= conf["lift_guard"]:
+        release()
+
+
+def on_term(*_):
+    release()
+    sys.exit(0)
+
+
+def on_hup(*_):
+    global conf
+    conf = load_config()
+
+
+signal.signal(signal.SIGTERM, on_term)
+signal.signal(signal.SIGINT, on_term)
+# Reload the config file.
+signal.signal(signal.SIGHUP, on_hup)
+# Release the button immediately (e.g. from another gesture tool).
+signal.signal(signal.SIGUSR1, lambda *_: release())
+
+libinput = subprocess.Popen(
+    ["stdbuf", "-oL", "libinput", "debug-events"],
+    stdout=subprocess.PIPE,
+    bufsize=0,
+)
+fd = libinput.stdout.fileno()
+buf = b""
+
+while True:
+    wait = grace_since + conf["timeout"] - time.monotonic() if state == GRACE else None
+    if wait is not None and wait <= 0:
+        release()
+        continue
+    ready, _, _ = select.select([fd], [], [], wait)
+    if not ready:
+        continue
+    chunk = os.read(fd, 65536)
+    if not chunk:
+        # libinput exited (e.g. no permission on /dev/input); let systemd restart us.
+        release()
+        sys.exit("three-finger-drag: libinput debug-events exited "
+                 "(is the user in the 'input' group?)")
+    *lines, buf = (buf + chunk).split(b"\n")
+    for line in lines:
+        handle(line.decode(errors="replace"))

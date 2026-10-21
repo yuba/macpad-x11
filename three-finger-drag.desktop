@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Three-finger drag
+Comment=macOS-style three-finger drag for X11 touchpads
+Exec=sh -c 'systemctl --user import-environment DISPLAY XAUTHORITY && systemctl --user start three-finger-drag.service'
+NoDisplay=true
+StartupNotify=false
+Terminal=false
+X-GNOME-Autostart-enabled=true
