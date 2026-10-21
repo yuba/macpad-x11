@@ -24,12 +24,19 @@ X11 上の Linux タッチパッドで、macOS のような三本指ドラッグ
 
 ## インストール
 
-### Arch Linux / Manjaro（AUR）
+### Arch Linux / Manjaro
+
+同梱の `PKGBUILD` で pacman パッケージをビルドしてインストールします。
 
 ```sh
-yay -S three-finger-drag
+git clone https://github.com/yuba/three-finger-drag.git
+cd three-finger-drag
+makepkg -si
 systemctl --user start three-finger-drag.service   # またはログインし直す
 ```
+
+`makepkg` がタグ付きリリースのダウンロードと依存パッケージのインストールを行います。
+アンインストールは `sudo pacman -R three-finger-drag` です。
 
 ### その他のディストリビューション
 

@@ -28,12 +28,19 @@ macOS-style three-finger drag for Linux touchpads on X11.
 
 ## Install
 
-### Arch Linux / Manjaro (AUR)
+### Arch Linux / Manjaro
+
+Build and install a pacman package with the bundled `PKGBUILD`:
 
 ```sh
-yay -S three-finger-drag
+git clone https://github.com/yuba/three-finger-drag.git
+cd three-finger-drag
+makepkg -si
 systemctl --user start three-finger-drag.service   # or just log in again
 ```
+
+`makepkg` downloads the tagged release and installs the dependencies.
+Uninstall with `sudo pacman -R three-finger-drag`.
 
 ### Any distribution
 
