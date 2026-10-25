@@ -1,0 +1,15 @@
+post_install() {
+  cat <<'MSG'
+==> macpad-x11 starts automatically at your next X11 login.
+==> To start it now:   systemctl --user start macpad-x11.service
+==> Your user must be in the 'input' group:  sudo gpasswd -a "$USER" input
+==> Config example:    /usr/share/doc/macpad-x11/config.example.toml
+==>   copy it to ~/.config/macpad-x11/config.toml to customize.
+==> Coming from three-finger-drag? Remove it first; your old config is read
+==>   until ~/.config/macpad-x11/config.toml exists.
+MSG
+}
+
+post_upgrade() {
+  echo "==> restart the daemon: systemctl --user restart macpad-x11.service"
+}

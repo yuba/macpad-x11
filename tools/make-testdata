@@ -1,0 +1,66 @@
+#!/bin/sh
+# Generate the grid test documents used by tools/probe into testdata/.
+# Every 200 px cell is labelled with its coordinates and has its own color,
+# so it is easy to see which point stayed under the pointer after a zoom.
+# The 50 px sub-cells carry small labels and their own shade, so that even
+# a small, highly zoomed patch is unique for tools/probe to match.
+set -eu
+
+OUT=$(cd "$(dirname "$0")/.." && pwd)/testdata
+mkdir -p "$OUT"
+W=2400 H=1600
+
+{
+  printf '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">\n' $W $H $W $H
+  printf '<rect width="100%%" height="100%%" fill="#ffffff"/>\n'
+  y=0
+  while [ $y -lt $H ]; do
+    x=0
+    while [ $x -lt $W ]; do
+      hue=$(( (x / 200 * 37 + y / 200 * 71) % 360 ))
+      printf '<rect x="%d" y="%d" width="200" height="200" fill="hsl(%d,70%%,88%%)"/>\n' $x $y $hue
+      printf '<text x="%d" y="%d" font-family="DejaVu Sans Mono" font-size="28" fill="#222">%d,%d</text>\n' \
+        $((x + 12)) $((y + 40)) $x $y
+      printf '<circle cx="%d" cy="%d" r="10" fill="#c00"/>\n' $((x + 100)) $((y + 100))
+      sy=0
+      while [ $sy -lt 200 ]; do
+        sx=0
+        while [ $sx -lt 200 ]; do
+          if [ $(( (sx + sy) / 50 % 2 )) -eq 1 ]; then
+            printf '<rect x="%d" y="%d" width="50" height="50" fill="#000" fill-opacity="0.05"/>\n' $((x + sx)) $((y + sy))
+          fi
+          if [ $sy -ge 50 ] || [ $sx -ge 100 ]; then
+            printf '<text x="%d" y="%d" font-family="DejaVu Sans" font-size="9" fill="#555">%d,%d</text>\n' \
+              $((x + sx + 3)) $((y + sy + 46)) $((x + sx)) $((y + sy))
+          fi
+          sx=$((sx + 50))
+        done
+        sy=$((sy + 50))
+      done
+      x=$((x + 200))
+    done
+    y=$((y + 200))
+  done
+  i=0
+  while [ $i -le $W ]; do
+    printf '<line x1="%d" y1="0" x2="%d" y2="%d" stroke="#888" stroke-width="%d"/>\n' $i $i $H $(( i % 200 ? 1 : 3 ))
+    i=$((i + 50))
+  done
+  i=0
+  while [ $i -le $H ]; do
+    printf '<line x1="0" y1="%d" x2="%d" y2="%d" stroke="#888" stroke-width="%d"/>\n' $i $W $i $(( i % 200 ? 1 : 3 ))
+    i=$((i + 50))
+  done
+  printf '</svg>\n'
+} > "$OUT/grid.svg"
+
+rsvg-convert "$OUT/grid.svg" -o "$OUT/grid.png"
+rsvg-convert -f pdf "$OUT/grid.svg" -o "$OUT/grid.pdf"
+cat > "$OUT/grid.html" <<'EOF'
+<!doctype html>
+<meta charset="utf-8">
+<title>macpad-x11 grid</title>
+<style>body { margin: 0; } img { display: block; }</style>
+<img src="grid.svg" width="2400" height="1600" alt="grid">
+EOF
+echo "wrote $OUT/grid.{svg,png,pdf,html}"

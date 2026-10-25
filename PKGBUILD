@@ -1,19 +1,24 @@
 # Maintainer: yuba <m.takuma@gmail.com>
-pkgname=three-finger-drag
-pkgver=0.1.0
+pkgname=macpad-x11
+pkgver=0.2.0
 pkgrel=1
-pkgdesc="macOS-style three-finger drag for X11 touchpads"
+pkgdesc="macOS-style touchpad gestures for X11: three-finger drag and pinch zoom around the pointer"
 arch=('any')
-url="https://github.com/yuba/three-finger-drag"
+url="https://github.com/yuba/macpad-x11"
 license=('MIT')
-depends=('python>=3.11' 'libinput' 'libxtst' 'coreutils')
+depends=('python>=3.11' 'libinput' 'libx11' 'libxtst' 'coreutils')
+provides=('three-finger-drag')
+conflicts=('three-finger-drag')
+replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('3218b20af06a038754c261b48db9704c00d7a8510ae25e7a5d53c3ab5772a927')
+# TODO: pin the checksum once v0.2.0 is tagged (updpkgsums).
+sha256sums=('SKIP')
 install=$pkgname.install
 
 package() {
   cd "$pkgname-$pkgver"
   install -Dm755 $pkgname "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 apps.toml "$pkgdir/usr/share/$pkgname/apps.toml"
   install -Dm644 $pkgname.service "$pkgdir/usr/lib/systemd/user/$pkgname.service"
   install -Dm644 $pkgname.desktop "$pkgdir/etc/xdg/autostart/$pkgname.desktop"
   install -Dm644 config.example.toml "$pkgdir/usr/share/doc/$pkgname/config.example.toml"

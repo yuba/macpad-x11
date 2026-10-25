@@ -1,0 +1,120 @@
+# How macpad-x11 makes each application zoom around the pointer when you pinch.
+#
+# Keys are matched against the WM_CLASS of the window under the pointer: the
+# class name first, then the instance name, exactly, then ignoring case, then
+# as globs ("vivaldi*" covers Vivaldi-stable, Vivaldi-flatpak, ...). The first
+# glob that matches wins. The keys of an entry are described in
+# config.example.toml; your config.toml's [apps."..."] entries override these.
+#
+# Every entry below was measured with tools/probe on X11 (Manjaro, Xfce,
+# October 2026); "step" is the app's own zoom factor per wheel click or key
+# press. Apps that are not listed get [pinch.default] (zoom = "keys").
+#
+# To add an app, run tools/probe on it (see the README) and send a pull
+# request with its suggested entry and the probe.png contact sheet. Do not
+# set zoom = "touch" for an app that does not zoom on touchscreen pinches:
+# X then turns the virtual fingers into a mouse drag.
+
+# --- Web browsers ------------------------------------------------------------
+
+# Chrome and the browsers built on Chromium zoom smoothly (visual zoom, like
+# a Mac) and pan while pinching.
+["google-chrome*"]
+zoom = "touch"
+
+# Chromium (Arch), chromium-browser (Debian/Ubuntu), Org.chromium.Chromium (Flatpak)
+["*chromium*"]
+zoom = "touch"
+
+["brave*"]
+zoom = "touch"
+
+["microsoft-edge*"]
+zoom = "touch"
+
+# Zooms smoothly, but the anchor lands a little off the pointer.
+["vivaldi*"]
+zoom = "touch"
+
+# Firefox handles touchscreen pinches only when started with MOZ_USE_XINPUT2=1
+# in its environment (e.g. in ~/.xprofile or the .desktop file). Without it,
+# touch pinches turn into a drag, so this is off by default; with it set,
+# copy this entry into your config.toml as [apps.firefox].
+# [firefox]
+# zoom = "touch"
+
+# --- Document viewers ----------------------------------------------------------
+
+["evince"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.18
+pan = "wheel"
+
+# GNOME's newer document viewer. Its wheel scrolls the other way round while
+# zoomed, so no panning.
+["papers"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.2
+
+# Has no pointer-anchored zoom: zooms around the view, but at least zooms
+# (zathura has no Ctrl+plus binding).
+["*zathura*"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.1
+
+# Com.github.xournalpp.xournalpp (Flatpak), Xournalpp
+["*xournalpp*"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.02
+
+# --- Image viewers -----------------------------------------------------------
+
+["eog"]
+zoom = "touch"
+
+["loupe"]
+zoom = "wheel"
+step = 1.3
+
+["ristretto"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.1
+
+["viewnior"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.1
+
+# Org.gnome.gThumb (Flatpak), Gthumb
+["*gthumb*"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.1
+
+# nomacs
+["Image Lounge"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.1
+
+# Its zoom keys zoom at the pointer.
+["gwenview"]
+zoom = "keys"
+step = 1.42
+pan = "wheel"
+
+# --- Graphics ------------------------------------------------------------------
+
+["gimp*"]
+zoom = "touch"
+
+["inkscape"]
+zoom = "touch"
+
+["krita"]
+zoom = "touch"

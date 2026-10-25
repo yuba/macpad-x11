@@ -3,3 +3,5 @@ src/
 pkg/
 __pycache__/
 *.tar.gz
+.venv/
+testdata/

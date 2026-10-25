@@ -1,0 +1,11 @@
+[Unit]
+Description=macOS-style touchpad gestures for X11
+Documentation=https://github.com/yuba/macpad-x11
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+ExecStart=/usr/bin/macpad-x11
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
