@@ -1,3 +1,5 @@
+<p align="center"><img src="art/icon.svg" width="128" alt="macpad-x11 icon"></p>
+
 # macpad-x11
 
 X11 上の Linux タッチパッドで、macOS のようなジェスチャーを実現します。
