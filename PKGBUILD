@@ -11,8 +11,7 @@ provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-# TODO: pin the checksum once v0.2.0 is tagged (updpkgsums).
-sha256sums=('SKIP')
+sha256sums=('5a3c62af3c4fa3bc00578c52db4db62074a6714956644ec1575548ba02f8875d')
 install=$pkgname.install
 
 package() {
