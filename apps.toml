@@ -109,6 +109,16 @@ zoom = "keys"
 step = 1.42
 pan = "wheel"
 
+# --- Media players -------------------------------------------------------------
+
+# mpv's default input.conf binds Ctrl+wheel to cursor-centric-zoom (tested with
+# 0.41; the anchor lands a little off the pointer). Its plain wheel seeks, so
+# no panning.
+["mpv"]
+zoom = "wheel"
+modifier = "ctrl"
+step = 1.14
+
 # --- Graphics ------------------------------------------------------------------
 
 ["gimp*"]

@@ -126,6 +126,7 @@ Measured with `tools/probe` (October 2026):
 | Evince | in steps (`wheel`) | yes |
 | Gwenview | in steps (`keys`) | yes |
 | Papers, Xournal++, Ristretto, Viewnior, gThumb, nomacs, Loupe | in steps (`wheel`) | no |
+| mpv | in steps (`wheel`), anchor slightly off | no |
 | zathura | zooms, but around the view (`wheel`) | no |
 
 **Firefox** handles touchscreen pinches only when it runs with

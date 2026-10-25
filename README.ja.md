@@ -118,6 +118,7 @@ WM_CLASS ごとに、いくつかの汎用的な方式のどれを使うかを�
 | Evince | 段階的（`wheel`） | あり |
 | Gwenview | 段階的（`keys`） | あり |
 | Papers、Xournal++、Ristretto、Viewnior、gThumb、nomacs、Loupe | 段階的（`wheel`） | なし |
+| mpv | 段階的（`wheel`）、中心が少しずれる | なし |
 | zathura | ズームはするが表示領域の中心が基準（`wheel`） | なし |
 
 **Firefox** は、環境変数 `MOZ_USE_XINPUT2=1` を付けて起動したときだけタッチスクリーンのピンチを扱います。
