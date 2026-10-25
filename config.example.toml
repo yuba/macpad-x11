@@ -59,3 +59,6 @@ zoom = "keys"
 # zoom_out = "ctrl+minus"
 # pan = "wheel"            # pan while pinching with wheel clicks: "wheel" or "none"
 # pan_horizontal = "buttons"   # horizontal wheel: "buttons" (6/7) or "shift" (Shift+wheel)
+# requires_env = "NAME=VALUE"  # use this entry only if the app's process has this
+#                          # environment variable ("NAME" alone: any value);
+#                          # otherwise the app gets [pinch.default]

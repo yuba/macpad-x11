@@ -82,6 +82,9 @@ APP_DEFAULTS = {
     "pan": "none",
     # Horizontal wheel panning: "buttons" (6/7) or "shift" (Shift+4/5).
     "pan_horizontal": "buttons",
+    # Apply the entry only if the app's process has this environment
+    # variable ("NAME=VALUE", or "NAME" for any value); "" for always.
+    "requires_env": "",
 }
 
 CHOICES = {
@@ -217,6 +220,13 @@ x11.XQueryPointer.argtypes = [ctypes.c_void_p, Window, ctypes.POINTER(Window), c
 x11.XQueryTree.argtypes = [ctypes.c_void_p, Window, ctypes.POINTER(Window), ctypes.POINTER(Window),
                            ctypes.POINTER(ctypes.POINTER(Window)), ctypes.POINTER(ctypes.c_uint)]
 x11.XGetClassHint.argtypes = [ctypes.c_void_p, Window, ctypes.POINTER(XClassHint)]
+x11.XInternAtom.restype = ctypes.c_ulong
+x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+x11.XGetWindowProperty.argtypes = [ctypes.c_void_p, Window, ctypes.c_ulong, ctypes.c_long, ctypes.c_long,
+                                   ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong),
+                                   ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong),
+                                   ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
+XA_CARDINAL = 6
 x11.XFree.argtypes = [ctypes.c_void_p]
 x11.XStringToKeysym.restype = ctypes.c_ulong
 x11.XStringToKeysym.argtypes = [ctypes.c_char_p]
@@ -293,41 +303,69 @@ class X:
         self.flush()
 
     def pointer(self):
-        """Return (x, y, (WM_CLASS class, instance) of the window under the pointer)."""
+        """Return (x, y, the application window under the pointer or 0)."""
         root, child = Window(), Window()
         rx, ry, wx, wy = (ctypes.c_int() for _ in range(4))
         mask = ctypes.c_uint()
         x11.XQueryPointer(self.dpy, self.root, ctypes.byref(root), ctypes.byref(child),
                           ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
-        return rx.value, ry.value, (self._class_of(child.value, 3) if child.value else None) or ("", "")
+        return rx.value, ry.value, self._client(child.value, 3) if child.value else 0
 
-    def _class_of(self, win, depth):
+    def _client(self, win, depth):
         # The child of the root is usually the window manager's frame; the
         # application's window (the one with WM_CLASS) is somewhere inside.
-        hint = XClassHint()
-        if x11.XGetClassHint(self.dpy, win, ctypes.byref(hint)):
-            names = tuple(ctypes.string_at(p).decode(errors="replace") if p else ""
-                          for p in (hint.res_class, hint.res_name))
-            for p in (hint.res_name, hint.res_class):
-                if p:
-                    x11.XFree(p)
-            return names
+        if self.names(win):
+            return win
         if depth == 0:
-            return None
+            return 0
         root, parent = Window(), Window()
         children, n = ctypes.POINTER(Window)(), ctypes.c_uint()
         if not x11.XQueryTree(self.dpy, win, ctypes.byref(root), ctypes.byref(parent),
                               ctypes.byref(children), ctypes.byref(n)):
-            return None
+            return 0
         try:
             for i in reversed(range(n.value)):
-                names = self._class_of(children[i], depth - 1)
-                if names:
-                    return names
+                client = self._client(children[i], depth - 1)
+                if client:
+                    return client
         finally:
             if children:
                 x11.XFree(ctypes.cast(children, ctypes.c_void_p))
-        return None
+        return 0
+
+    def names(self, win):
+        """Return the (class, instance) of win's WM_CLASS, or None."""
+        hint = XClassHint()
+        if not win or not x11.XGetClassHint(self.dpy, win, ctypes.byref(hint)):
+            return None
+        names = tuple(ctypes.string_at(p).decode(errors="replace") if p else ""
+                      for p in (hint.res_class, hint.res_name))
+        for p in (hint.res_name, hint.res_class):
+            if p:
+                x11.XFree(p)
+        return names
+
+    def pid(self, win):
+        """Return the _NET_WM_PID of win, or None."""
+        if not win:
+            return None
+        atom = x11.XInternAtom(self.dpy, b"_NET_WM_PID", True)
+        if not atom:
+            return None
+        actual_type, actual_format = ctypes.c_ulong(), ctypes.c_int()
+        nitems, after, prop = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_void_p()
+        if x11.XGetWindowProperty(self.dpy, win, atom, 0, 1, False, XA_CARDINAL,
+                                  ctypes.byref(actual_type), ctypes.byref(actual_format),
+                                  ctypes.byref(nitems), ctypes.byref(after), ctypes.byref(prop)) != 0:
+            return None
+        try:
+            # Format-32 properties come back as an array of C longs.
+            if actual_format.value == 32 and nitems.value >= 1 and prop.value:
+                return ctypes.cast(prop, ctypes.POINTER(ctypes.c_ulong))[0]
+            return None
+        finally:
+            if prop.value:
+                x11.XFree(prop)
 
 
 # --- virtual touchscreen ----------------------------------------------------
@@ -460,6 +498,21 @@ class Drag:
             self.release()
 
 
+def has_env(pid, requirement):
+    """Whether process pid has requirement ("NAME=VALUE", or "NAME" set to anything) in its environment."""
+    try:
+        with open(f"/proc/{int(pid)}/environ", "rb") as f:
+            env = f.read().split(b"\0")
+    except (TypeError, ValueError, OSError):
+        # No _NET_WM_PID, another user's process, or a pid from a sandbox's
+        # own namespace (Flatpak): we cannot tell, so assume not.
+        return False
+    want = requirement.encode()
+    if b"=" in want:
+        return want in env
+    return any(e.startswith(want + b"=") and len(e) > len(want) + 1 for e in env)
+
+
 class Pinch:
     def __init__(self, x, conf, default_app, apps):
         self.x = x
@@ -480,7 +533,7 @@ class Pinch:
         # packagings (Vivaldi-stable, Vivaldi-flatpak, ...).
         self.apps_globbed = [(key.lower(), table) for key, table in apps.items() if any(c in key for c in "*?[")]
 
-    def settings(self, names):
+    def settings(self, names, pid=None):
         # The class name first, then the instance name (some toolkits use a
         # generic class, e.g. "dotnet"): exactly, ignoring case, then by glob.
         names = [n for n in names if n]
@@ -489,6 +542,10 @@ class Pinch:
         if table is None:
             table = next((t for key, t in self.apps_globbed
                           if any(fnmatch.fnmatchcase(n.lower(), key) for n in names)), {})
+        # Some apps handle a method only when started with some environment
+        # variable; without it, they get the default instead.
+        if table.get("requires_env") and not has_env(pid, table["requires_env"]):
+            table = {}
         app = {**self.default_app, **table}
         if app["zoom"] == "touch" and not self.touch:
             app["zoom"] = "keys"
@@ -508,8 +565,8 @@ class Pinch:
 
     def begin(self):
         # The anchor is the pointer at the start of the pinch.
-        self.cx, self.cy, names = self.x.pointer()
-        self.app = self.settings(names)
+        self.cx, self.cy, win = self.x.pointer()
+        self.app = self.settings(self.x.names(win) or ("", ""), self.x.pid(win))
         self.pan_x = self.pan_y = 0.0
         self.step_scale = 1.0
         if self.app["zoom"] == "touch":

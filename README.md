@@ -108,7 +108,8 @@ listed get `[pinch.default]` (`zoom = "keys"`).
 
 Entries are matched against both parts of WM_CLASS (class and instance
 name), ignoring case, and may be globs, so `"vivaldi*"` covers both the
-native and the Flatpak build.
+native and the Flatpak build. An entry with `requires_env = "NAME=VALUE"`
+applies only to processes that have that environment variable.
 
 ### Supported apps
 
@@ -126,14 +127,10 @@ Measured with `tools/probe` (October 2026):
 | zathura | zooms, but around the view (`wheel`) | no |
 
 **Firefox** handles touchscreen pinches only when it runs with
-`MOZ_USE_XINPUT2=1` in its environment (for example
-`export MOZ_USE_XINPUT2=1` in `~/.xprofile`). Once that is set, add this to
-your config.toml:
-
-```toml
-[apps.firefox]
-zoom = "touch"
-```
+`MOZ_USE_XINPUT2=1` in its environment, so set it, for example with
+`export MOZ_USE_XINPUT2=1` in `~/.xprofile`. macpad-x11 checks the variable
+in each Firefox process (the `requires_env` key of an entry) and uses keys
+for a Firefox started without it.
 
 Not supported yet: Okular, LibreOffice and KolourPaint have no
 pointer-anchored zoom that macpad-x11 can trigger; VS Code and other

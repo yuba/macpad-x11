@@ -37,11 +37,12 @@ zoom = "touch"
 zoom = "touch"
 
 # Firefox handles touchscreen pinches only when started with MOZ_USE_XINPUT2=1
-# in its environment (e.g. in ~/.xprofile or the .desktop file). Without it,
-# touch pinches turn into a drag, so this is off by default; with it set,
-# copy this entry into your config.toml as [apps.firefox].
-# [firefox]
-# zoom = "touch"
+# in its environment (e.g. export it in ~/.xprofile). Without it, touch
+# pinches would turn into a drag, so such a Firefox gets [pinch.default].
+# (A Flatpak Firefox's environment cannot be read, so it always does.)
+["firefox*"]
+zoom = "touch"
+requires_env = "MOZ_USE_XINPUT2=1"
 
 # --- Document viewers ----------------------------------------------------------
 

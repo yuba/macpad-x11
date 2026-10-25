@@ -101,6 +101,7 @@ WM_CLASS ごとに、いくつかの汎用的な方式のどれを使うかを�
 
 項目は WM_CLASS の両方の部分（クラス名とインスタンス名）に、大文字・小文字を区別せずに照合され、
 ワイルドカードも使えます。たとえば `"vivaldi*"` はネイティブ版と Flatpak 版の両方に一致します。
+`requires_env = "NAME=VALUE"` を持つ項目は、その環境変数を持つプロセスにだけ適用されます。
 
 ### 対応アプリ
 
@@ -117,13 +118,9 @@ WM_CLASS ごとに、いくつかの汎用的な方式のどれを使うかを�
 | Papers、Xournal++、Ristretto、Viewnior、gThumb、nomacs、Loupe | 段階的（`wheel`） | なし |
 | zathura | ズームはするが表示領域の中心が基準（`wheel`） | なし |
 
-**Firefox** は、環境変数 `MOZ_USE_XINPUT2=1` を付けて起動したときだけタッチスクリーンのピンチを扱います
-（たとえば `~/.xprofile` に `export MOZ_USE_XINPUT2=1`）。設定したら config.toml に次を追加してください。
-
-```toml
-[apps.firefox]
-zoom = "touch"
-```
+**Firefox** は、環境変数 `MOZ_USE_XINPUT2=1` を付けて起動したときだけタッチスクリーンのピンチを扱います。
+`~/.xprofile` に `export MOZ_USE_XINPUT2=1` と書くなどして設定してください。macpad-x11 は Firefox の
+プロセスごとにこの変数を確かめ（項目の `requires_env`）、付けずに起動された Firefox にはキー入力を使います。
 
 未対応: Okular、LibreOffice、KolourPaint には macpad-x11 から呼び出せるポインター中心のズームがありません。
 VS Code などの Electron アプリはピンチズームを無効にしています。Pinta は WM_CLASS（`dotnet`）で見分けられません。
