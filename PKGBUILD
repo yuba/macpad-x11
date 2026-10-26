@@ -11,8 +11,7 @@ provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-# Pinned in a follow-up commit once the tag exists (updpkgsums).
-sha256sums=('SKIP')
+sha256sums=('66172085cc2fbc0dca43841aba3a294580bc2cb5ad5363d3d6356ab09fdb4c9e')
 install=$pkgname.install
 
 package() {
