@@ -1,12 +1,12 @@
 pkgbase = macpad-x11
 	pkgdesc = macOS-style touchpad gestures for X11: three-finger drag and pinch zoom around the pointer
-	pkgver = 0.2.1
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/yuba/macpad-x11
 	install = macpad-x11.install
 	arch = any
 	license = MIT
-	depends = python>=3.11
+	depends = python>=3.8
 	depends = libinput
 	depends = libx11
 	depends = libxtst
@@ -14,7 +14,7 @@ pkgbase = macpad-x11
 	provides = three-finger-drag
 	conflicts = three-finger-drag
 	replaces = three-finger-drag
-	source = macpad-x11-0.2.1.tar.gz::https://github.com/yuba/macpad-x11/archive/refs/tags/v0.2.1.tar.gz
-	sha256sums = cf2bd5f46417368b39ff87d5855a33616d6b242763ae3b582d73698ad17d68cf
+	source = macpad-x11-0.3.0.tar.gz::https://github.com/yuba/macpad-x11/archive/refs/tags/v0.3.0.tar.gz
+	sha256sums = 8cfec7b6ec549af176a03d1739118bc7e5e9c35674c65711cceddcb82fd7c2e7
 
 pkgname = macpad-x11
