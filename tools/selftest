@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Check macpad-x11 without X or a touchpad: config loading, event parsing and
+the drag state machine. Usage: tools/selftest [path/to/macpad-x11]"""
+import os
+import sys
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+# The checkout's script by default; pass a path to test an installed one.
+PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "macpad-x11")
+# Everything before the main section: definitions only, no X connection.
+source = open(PATH, encoding="utf-8").read().split("# --- main")[0]
+g = {"__file__": PATH, "__name__": "selftest"}
+exec(compile(source, PATH, "exec"), g)
+
+conf, default_app, apps = g["load_config"]()
+assert conf["drag"]["fingers"] == 3 and conf["pinch"]["enabled"] is True, conf
+assert default_app["zoom"] == "keys", default_app
+assert apps["evince"] == {"zoom": "wheel", "modifier": "ctrl", "step": 1.18, "pan": "wheel"}, apps["evince"]
+
+
+class FakePinch:
+    touch = True
+
+
+p = FakePinch()
+g["Pinch"].configure(p, conf["pinch"], default_app, apps)
+lookup = g["Pinch"].settings
+for names, zoom in ((("Vivaldi-flatpak", "vivaldi-stable"), "touch"),
+                    (("Org.chromium.Chromium", "chromium"), "touch"),
+                    (("Evince", "evince"), "wheel"),
+                    (("firefox", "Navigator"), "keys"),          # no MOZ_USE_XINPUT2 in pid None
+                    (("Xfce4-terminal", "xfce4-terminal"), "keys")):
+    got = lookup(p, names)["zoom"]
+    assert got == zoom, (names, got)
+
+parse = g["parse"]
+assert parse(" event7   GESTURE_PINCH_UPDATE  12 +1.012s\t2  1.00/ 2.00 ( 0.00/ 0.00 unaccelerated)  1.30 @  0.00") \
+    == ("GESTURE_PINCH_UPDATE", 2)
+assert parse(" event7   GESTURE_SWIPE_BEGIN     +1.000s\t3") == ("GESTURE_SWIPE_BEGIN", 3)
+
+
+class FakeX:
+    def __init__(self):
+        self.log = []
+
+    def button(self, b, down):
+        self.log.append(("button", b, down))
+
+    def move_by(self, dx, dy):
+        self.log.append(("move", dx, dy))
+
+
+def feed(drag, *lines):
+    for line in lines:
+        event, fingers = parse(line)
+        drag.handle(event, fingers, line)
+
+
+B = " event7   GESTURE_SWIPE_BEGIN     +1.000s\t3"
+U = " event7   GESTURE_SWIPE_UPDATE   5 +1.010s\t3  2.00/ 1.00 ( 0.00/ 0.00 unaccelerated)"
+E = " event7   GESTURE_SWIPE_END       +1.100s\t3"
+M = " event7   POINTER_MOTION          +1.200s\t  1.00/  0.00 ( 0.00/ 0.00 unaccelerated)"
+drag_conf = dict(conf["drag"], timeout=0.05)
+
+x = FakeX()
+d = g["Drag"](x, drag_conf)
+feed(d, B, U, E)
+assert d.state == d.GRACE and x.log == [("button", 1, True), ("move", 6, 3)], x.log
+time.sleep(0.06)
+d.tick(time.monotonic())
+assert d.state == d.IDLE and x.log[-1] == ("button", 1, False)
+
+x = FakeX()
+d = g["Drag"](x, drag_conf)
+feed(d, B, E, B, E, M)
+assert d.state == d.IDLE and [e for e in x.log if e[0] == "button"] == [("button", 1, True), ("button", 1, False)]
+
+print("selftest passed on Python %d.%d.%d" % sys.version_info[:3])

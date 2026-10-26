@@ -1,0 +1,112 @@
+name: CI
+
+# Every push and pull request: the self test on the oldest and newest
+# supported Python. Tags (vX.Y.Z): also build the .deb and .rpm packages,
+# install them on several distributions, and attach them to the release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  NFPM_VERSION: 2.48.0
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The official images, as hosted runners no longer offer old Pythons.
+        python: ["3.8", "3"]
+    container: python:${{ matrix.python }}-slim
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update -qq && apt-get install -y -qq libx11-6 libxtst6
+      - run: python -c "import ast; ast.parse(open('macpad-x11').read(), feature_version=(3, 8))"
+      - run: python tools/selftest
+
+  package:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: selftest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that the tag matches __version__
+        run: |
+          version=$(python3 macpad-x11 --version | cut -d' ' -f2)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, __version__ $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install nfpm
+        run: |
+          curl -fsSLO "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSLO "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/checksums.txt"
+          grep " nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz\$" checksums.txt | sha256sum -c -
+          tar -xzf "nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" nfpm
+      - name: Build packages
+        run: |
+          mkdir dist
+          ./nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+          ./nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: dist/
+
+  install-test:
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "ubuntu:20.04", format: deb }
+          - { image: "ubuntu:24.04", format: deb }
+          - { image: "debian:12", format: deb }
+          - { image: "fedora:latest", format: rpm }
+    container: ${{ matrix.image }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: dist
+      - name: Install
+        run: |
+          if [ "${{ matrix.format }}" = deb ]; then
+            apt-get update -qq && apt-get install -y -qq ./dist/*.deb
+          else
+            dnf install -y ./dist/*.rpm
+          fi
+      - name: Check
+        run: |
+          libinput --help | grep -q debug-events
+          macpad-x11 --version
+          python3 tools/selftest /usr/bin/macpad-x11
+
+  release:
+    needs: install-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: dist
+      - name: Attach the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # The release is normally created by hand with its notes; create a
+          # bare one if it does not exist yet.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" dist/*.deb dist/*.rpm --clobber

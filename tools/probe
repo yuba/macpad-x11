@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Find out how macpad-x11 should drive an application, and print its apps.toml entry.
+"""Find out how macpad-x11 should drive an application, and print its apps.ini entry.
 
 Point at a window (or pass --window). probe replays synthetic pinches through
 ../macpad-x11 with each zoom method forced for that window's WM_CLASS,
-measures how the content moved, and prints an apps.toml entry for the best
+measures how the content moved, and prints an apps.ini entry for the best
 method. It then checks wheel panning with that method, and saves a contact
 sheet with every before/after pair (pointer marked with a red cross) so the
 verdicts can be checked by eye.
@@ -19,7 +19,6 @@ the touchpad is not needed and the running macpad-x11 service is unaffected.
 Requires numpy and OpenCV (pip install numpy opencv-python-headless).
 """
 import argparse
-import json
 import math
 import os
 import shlex
@@ -61,11 +60,8 @@ def shell_vars(text):
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 
 
-def toml_table(settings):
-    out = []
-    for k, v in settings.items():
-        out.append(f"{k} = {json.dumps(v)}" if not isinstance(v, float) else f"{k} = {v:g}")
-    return "\n".join(out)
+def ini_table(settings):
+    return "\n".join(f"{k} = {v:g}" if isinstance(v, float) else f"{k} = {v}" for k, v in settings.items())
 
 
 def pinch_lines(scales, dx=0.0, dy=0.0):
@@ -85,8 +81,8 @@ def run_pinch(tmp, cls, settings, lines):
     """Run macpad-x11 once with the given app settings on a fake event stream."""
     conf_dir = os.path.join(tmp, "config", "macpad-x11")
     os.makedirs(conf_dir, exist_ok=True)
-    with open(os.path.join(conf_dir, "config.toml"), "w") as f:
-        f.write(f"[drag]\nenabled = false\n\n[apps.{json.dumps(cls)}]\n{toml_table(settings)}\n")
+    with open(os.path.join(conf_dir, "config.ini"), "w") as f:
+        f.write(f"[drag]\nenabled = no\n\n[app {cls}]\n{ini_table(settings)}\n")
     seq = os.path.join(tmp, "seq.txt")
     with open(seq, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -259,7 +255,7 @@ def main():
         subprocess.run(["montage", "-font", "DejaVu-Sans", "-pointsize", "18", *sheets,
                         "-tile", "2x", "-geometry", "+6+6", "-background", "#ddd", args.output], check=True)
     if entry:
-        print(f"\nsuggested apps.toml entry:\n\n[{json.dumps(key)}]\n{toml_table(entry)}\n")
+        print(f"\nsuggested apps.ini entry:\n\n[app {key}]\n{ini_table(entry)}\n")
     print(f"contact sheet: {args.output}")
 
 

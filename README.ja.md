@@ -12,7 +12,7 @@ X11 上の Linux タッチパッドで、macOS のようなジェスチャーを
 - **ポインターを中心にしたピンチズーム。** ズーム中もポインターの下の場所が動かず、
   ピンチしながら指を動かせばパンもできます。Chrome などの Chromium / Electron アプリでは、
   X11 版 Chrome がタッチパッドのピンチを無視するにもかかわらず、ネイティブの滑らかなズームになります。
-  その他のアプリはホイールやキーで操作します。どれを使うかは [apps.toml](apps.toml) に書かれていて、
+  その他のアプリはホイールやキーで操作します。どれを使うかは [apps.ini](apps.ini) に書かれていて、
   コードに触れずに自分でアプリを追加できます。
 - Python スクリプト 1 本。コンパイル不要、root デーモン不要、fusuma や touchegg も不要
 
@@ -21,7 +21,7 @@ macpad-x11 は、ピンチを覚える前は three-finger-drag という名前�
 ## 動作要件
 
 - **X11** セッション（Wayland 非対応）
-- Python 3.11 以降
+- Python 3.8 以降（標準ライブラリのみ使用）
 - `libinput`（`libinput debug-events` コマンド。Debian/Ubuntu では `libinput-tools` パッケージ）
 - `libX11` と `libXtst`（Arch: `libx11 libxtst` / Debian・Ubuntu: `libx11-6 libxtst6` / Fedora: `libX11 libXtst`）
 - ユーザーが `input` グループに所属していること（タッチパッドの読み取りと、
@@ -47,6 +47,28 @@ systemctl --user start macpad-x11.service   # またはログインし直す
 `makepkg` がタグ付きリリースのダウンロードと依存パッケージのインストールを行います。
 このパッケージは three-finger-drag を置き換えます。アンインストールは `sudo pacman -R macpad-x11` です。
 
+### Debian / Ubuntu
+
+[最新リリース](https://github.com/yuba/macpad-x11/releases/latest) から `macpad-x11_*_all.deb` をダウンロードして:
+
+```sh
+sudo apt install ./macpad-x11_*_all.deb
+systemctl --user start macpad-x11.service   # またはログインし直す
+```
+
+Debian 12 以降、Ubuntu 20.04 以降に対応しています。アンインストールは `sudo apt remove macpad-x11` です。
+
+### Fedora
+
+[最新リリース](https://github.com/yuba/macpad-x11/releases/latest) から `macpad-x11-*.noarch.rpm` をダウンロードして:
+
+```sh
+sudo dnf install ./macpad-x11-*.noarch.rpm
+systemctl --user start macpad-x11.service   # またはログインし直す
+```
+
+アンインストールは `sudo dnf remove macpad-x11` です。
+
 ### その他のディストリビューション
 
 ```sh
@@ -56,8 +78,7 @@ cd macpad-x11
 ```
 
 `~/.local` へのインストール、systemd ユーザーサービスと XDG autostart の登録、
-デーモンの起動までを行います。ユーザー単位でインストールされた three-finger-drag は
-削除され、その設定は引き継がれます。アンインストールは:
+デーモンの起動までを行います。アンインストールは:
 
 ```sh
 ./install.sh --uninstall
@@ -65,29 +86,29 @@ cd macpad-x11
 
 ## 設定
 
-`~/.config/macpad-x11/config.toml`。すべての項目は省略可能です。全項目は
-[config.example.toml](config.example.toml) を参照してください。
+`~/.config/macpad-x11/config.ini`。すべての項目は省略可能です。全項目は
+[config.example.ini](config.example.ini) を参照してください。
 
-```toml
+```ini
 [drag]
-timeout = 0.5      # 指を離した後の猶予時間（秒）
-speed = 3.0        # スワイプ量に対するポインター移動量の倍率
+timeout = 0.5      ; 指を離した後の猶予時間（秒）
+speed = 3.0        ; スワイプ量に対するポインター移動量の倍率
 
 [pinch]
-enabled = true
+enabled = yes
 
-[apps."Some-app"]  # WM_CLASS のクラス名。apps.toml より優先
-zoom = "wheel"
-modifier = "ctrl"
+[app Some-app]     ; WM_CLASS のクラス名またはインスタンス名。apps.ini より優先
+zoom = wheel
+modifier = ctrl
 step = 1.1
-pan = "wheel"
+pan = wheel
 ```
 
 変更は `systemctl --user reload macpad-x11.service` で反映されます。
 
-## ピンチズームと apps.toml
+## ピンチズームと apps.ini
 
-ポインターを中心にズームさせる方法はアプリごとに違うため、[apps.toml](apps.toml) に
+ポインターを中心にズームさせる方法はアプリごとに違うため、[apps.ini](apps.ini) に
 WM_CLASS ごとに、いくつかの汎用的な方式のどれを使うかを書いてあります。
 
 | `zoom`  | macpad-x11 が送るもの                                          | 向いているアプリ                     |
@@ -98,12 +119,12 @@ WM_CLASS ごとに、いくつかの汎用的な方式のどれを使うかを�
 | `none`  | 何もしない                                                     | 自前でピンチを処理するアプリ         |
 
 `wheel` と `keys` では、`step` はアプリ側の 1 クリック（1 打鍵）あたりの倍率で、
-`pan = "wheel"` を指定するとピンチ中の指の移動をホイールでのパンに変換します。
-載っていないアプリには `[pinch.default]`（`zoom = "keys"`）が使われます。
+`pan = wheel` を指定するとピンチ中の指の移動をホイールでのパンに変換します。
+載っていないアプリには `[pinch.default]`（`zoom = keys`）が使われます。
 
-項目は WM_CLASS の両方の部分（クラス名とインスタンス名）に、大文字・小文字を区別せずに照合され、
-ワイルドカードも使えます。たとえば `"vivaldi*"` はネイティブ版と Flatpak 版の両方に一致します。
-`requires_env = "NAME=VALUE"` を持つ項目は、その環境変数を持つプロセスにだけ適用されます。
+`[app 名前]` のセクションは WM_CLASS の両方の部分（クラス名とインスタンス名）に、大文字・小文字を区別せずに照合され、
+名前にはワイルドカードも使えます。たとえば `[app vivaldi*]` はネイティブ版と Flatpak 版の両方に一致します。
+`requires_env = NAME=VALUE` を持つセクションは、その環境変数を持つプロセスにだけ適用されます。
 
 ### 対応アプリ
 
@@ -143,9 +164,9 @@ tools/make-testdata                 # testdata/ に方眼の文書を生成
 ```
 
 合成したピンチで全方式を試し（タッチパッドや動作中のサービスには影響しません）、
-内容がどれだけずれたかを測って、設定ファイルや apps.toml に貼れる設定を出力します。
+内容がどれだけずれたかを測って、設定ファイルや apps.ini に貼れる設定を出力します。
 歓迎画面などのダイアログは先に閉じ、比較画像も目で確認してください。模様の少ない文書だと計測を誤ることがあります。
-タッチスクリーンのピンチでズームしないアプリには、決して `zoom = "touch"` を設定しないでください。
+タッチスクリーンのピンチでズームしないアプリには、決して `zoom = touch` を設定しないでください。
 X が仮想の指をマウスのドラッグとして扱ってしまいます。
 アプリを追加するプルリクエストを歓迎します。比較画像 `probe.png` を添付してください。
 

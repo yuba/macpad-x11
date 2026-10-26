@@ -1,0 +1,64 @@
+# nfpm configuration for the .deb and .rpm packages (https://nfpm.goreleaser.com/).
+# Build from the repository root, e.g.:
+#   VERSION=0.3.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+# The Arch package is built from PKGBUILD instead.
+name: macpad-x11
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: semver
+release: 1
+section: utils
+priority: optional
+maintainer: yuba <m.takuma@gmail.com>
+description: |-
+  macOS-style touchpad gestures for X11
+  Three-finger drag, and pinch to zoom around the pointer in browsers,
+  document and image viewers and graphics apps.
+vendor: yuba
+homepage: https://github.com/yuba/macpad-x11
+license: MIT
+
+contents:
+  - src: macpad-x11
+    dst: /usr/bin/macpad-x11
+    file_info:
+      mode: 0755
+  - src: apps.ini
+    dst: /usr/share/macpad-x11/apps.ini
+  - src: macpad-x11.service
+    dst: /usr/lib/systemd/user/macpad-x11.service
+  - src: macpad-x11.desktop
+    dst: /etc/xdg/autostart/macpad-x11.desktop
+    type: config
+  - src: config.example.ini
+    dst: /usr/share/doc/macpad-x11/config.example.ini
+  - src: README.md
+    dst: /usr/share/doc/macpad-x11/README.md
+  # Where each format expects the license.
+  - src: LICENSE
+    dst: /usr/share/doc/macpad-x11/copyright
+    packager: deb
+  - src: LICENSE
+    dst: /usr/share/licenses/macpad-x11/LICENSE
+    type: license
+    packager: rpm
+
+scripts:
+  postinstall: packaging/postinstall.sh
+
+overrides:
+  deb:
+    depends:
+      - python3 (>= 3.8)
+      - libinput-tools
+      - libx11-6
+      - libxtst6
+      - coreutils
+  rpm:
+    depends:
+      - python3 >= 3.8
+      - libinput-utils
+      - libX11
+      - libXtst
+      - coreutils

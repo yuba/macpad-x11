@@ -14,7 +14,7 @@ macOS-style touchpad gestures for Linux on X11.
   put while you zoom, and moving your fingers while pinching pans — in
   Chrome and other Chromium/Electron apps this is smooth, native zoom, even
   though Chrome on X11 ignores touchpad pinches. Other apps are driven with
-  wheel clicks or keys; [apps.toml](apps.toml) says which, and you can add
+  wheel clicks or keys; [apps.ini](apps.ini) says which, and you can add
   your own apps without touching any code.
 - One small Python script. No compilation, no root daemon, no fusuma or
   touchegg needed.
@@ -24,7 +24,7 @@ macpad-x11 was called three-finger-drag before it learned to pinch.
 ## Requirements
 
 - An **X11** session (Wayland is not supported)
-- Python 3.11 or later
+- Python 3.8 or later (standard library only)
 - `libinput` (the `libinput debug-events` command — on Debian/Ubuntu it is in
   the `libinput-tools` package)
 - `libX11` and `libXtst` (`libx11 libxtst` on Arch, `libx11-6 libxtst6` on
@@ -52,6 +52,31 @@ systemctl --user start macpad-x11.service   # or just log in again
 `makepkg` downloads the tagged release and installs the dependencies. The
 package replaces three-finger-drag. Uninstall with `sudo pacman -R macpad-x11`.
 
+### Debian / Ubuntu
+
+Download `macpad-x11_*_all.deb` from the
+[latest release](https://github.com/yuba/macpad-x11/releases/latest), then:
+
+```sh
+sudo apt install ./macpad-x11_*_all.deb
+systemctl --user start macpad-x11.service   # or just log in again
+```
+
+Debian 12 or later, Ubuntu 20.04 or later. Uninstall with
+`sudo apt remove macpad-x11`.
+
+### Fedora
+
+Download `macpad-x11-*.noarch.rpm` from the
+[latest release](https://github.com/yuba/macpad-x11/releases/latest), then:
+
+```sh
+sudo dnf install ./macpad-x11-*.noarch.rpm
+systemctl --user start macpad-x11.service   # or just log in again
+```
+
+Uninstall with `sudo dnf remove macpad-x11`.
+
 ### Any distribution
 
 ```sh
@@ -61,9 +86,7 @@ cd macpad-x11
 ```
 
 This installs into `~/.local`, registers a systemd user service and an XDG
-autostart entry, and starts the daemon. A per-user install of
-three-finger-drag is removed and its settings are carried over. To remove
-macpad-x11:
+autostart entry, and starts the daemon. To remove macpad-x11:
 
 ```sh
 ./install.sh --uninstall
@@ -71,30 +94,30 @@ macpad-x11:
 
 ## Configuration
 
-`~/.config/macpad-x11/config.toml` — every setting is optional; see
-[config.example.toml](config.example.toml) for all of them.
+`~/.config/macpad-x11/config.ini` — every setting is optional; see
+[config.example.ini](config.example.ini) for all of them.
 
-```toml
+```ini
 [drag]
-timeout = 0.5      # grace period (s) after lifting the fingers
-speed = 3.0        # pointer movement per unit of swipe movement
+timeout = 0.5      ; grace period (s) after lifting the fingers
+speed = 3.0        ; pointer movement per unit of swipe movement
 
 [pinch]
-enabled = true
+enabled = yes
 
-[apps."Some-app"]  # WM_CLASS class name; overrides apps.toml
-zoom = "wheel"
-modifier = "ctrl"
+[app Some-app]     ; WM_CLASS class or instance name; overrides apps.ini
+zoom = wheel
+modifier = ctrl
 step = 1.1
-pan = "wheel"
+pan = wheel
 ```
 
 Apply changes with `systemctl --user reload macpad-x11.service`.
 
-## Pinch zoom and apps.toml
+## Pinch zoom and apps.ini
 
 What zooms an app around the pointer differs from app to app, so
-[apps.toml](apps.toml) lists, per WM_CLASS, which of a few generic methods to
+[apps.ini](apps.ini) lists, per WM_CLASS, which of a few generic methods to
 use:
 
 | `zoom`  | what macpad-x11 sends                                        | good for                          |
@@ -105,13 +128,14 @@ use:
 | `none`  | nothing                                                       | apps that handle pinches themselves |
 
 With `wheel` and `keys`, `step` is the app's zoom factor per click or key
-press, and `pan = "wheel"` pans with wheel clicks while you pinch. Apps not
-listed get `[pinch.default]` (`zoom = "keys"`).
+press, and `pan = wheel` pans with wheel clicks while you pinch. Apps not
+listed get `[pinch.default]` (`zoom = keys`).
 
-Entries are matched against both parts of WM_CLASS (class and instance
-name), ignoring case, and may be globs, so `"vivaldi*"` covers both the
-native and the Flatpak build. An entry with `requires_env = "NAME=VALUE"`
-applies only to processes that have that environment variable.
+`[app NAME]` sections are matched against both parts of WM_CLASS (class and
+instance name), ignoring case, and NAME may be a glob, so `[app vivaldi*]`
+covers both the native and the Flatpak build. A section with
+`requires_env = NAME=VALUE` applies only to processes that have that
+environment variable.
 
 ### Supported apps
 
@@ -155,9 +179,9 @@ tools/make-testdata                 # grid documents in testdata/
 
 It tries every method with synthetic pinches (your touchpad and the running
 service are not involved), measures how far the content moved, and prints
-an entry to paste into your config or into apps.toml. Close welcome and
+an entry to paste into your config or into apps.ini. Close welcome and
 other dialogs first, and look at the contact sheet: a document that is too
-plain to match can fool the measurement. Never set `zoom = "touch"` for an
+plain to match can fool the measurement. Never set `zoom = touch` for an
 app that does not zoom on touchscreen pinches — X then turns the virtual
 fingers into a mouse drag. Pull requests that add apps are very welcome —
 please attach the `probe.png` contact sheet.

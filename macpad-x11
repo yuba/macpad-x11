@@ -9,21 +9,33 @@ drag   Three-finger drag. A three-finger swipe presses the left button and
        motion, click or scroll during the grace period ends the drag.
 
 pinch  Pinch to zoom around the pointer. How each application is driven is
-       data, not code: apps.toml maps WM_CLASS names to generic methods, and
-       config.toml can override them.
-         zoom = "touch"  Replay the pinch on a virtual uinput touchscreen with
-                         one finger on the pointer. Apps that handle
-                         touchscreen pinches (Chromium, Electron, some GTK)
-                         zoom and pan smoothly around it.
-         zoom = "wheel"  Wheel clicks at the pointer, optionally with a
-                         modifier held.
-         zoom = "keys"   Key presses; most apps zoom around their center.
-         zoom = "none"   Leave the pinch alone.
-         pan = "wheel"   Pan with wheel clicks while pinching (wheel/keys).
+       data, not code: apps.ini maps WM_CLASS names to generic methods, and
+       config.ini can override them.
+         zoom = touch  Replay the pinch on a virtual uinput touchscreen with
+                       one finger on the pointer. Apps that handle
+                       touchscreen pinches (Chromium, Electron, some GTK)
+                       zoom and pan smoothly around it.
+         zoom = wheel  Wheel clicks at the pointer, optionally with a
+                       modifier held.
+         zoom = keys   Key presses; most apps zoom around their center.
+         zoom = none   Leave the pinch alone.
+         pan = wheel   Pan with wheel clicks while pinching (wheel/keys).
 
 The daemon must stay resident: libinput does not track touches that were
 already on the touchpad when it started.
+
+Runs on Python 3.8 or later with the standard library only.
 """
+import sys
+
+# Checked before anything else, so that users of an old Python get a plain
+# message instead of a traceback. Keep this file free of syntax newer than
+# Python 3.8, or older interpreters fail before reaching this check.
+if sys.version_info < (3, 8):
+    sys.stderr.write("macpad-x11 needs Python 3.8 or later; this is Python %d.%d.\n" % sys.version_info[:2])
+    sys.exit(1)
+
+import configparser
 import ctypes
 import fcntl
 import fnmatch
@@ -34,12 +46,10 @@ import select
 import signal
 import struct
 import subprocess
-import sys
 import time
-import tomllib
 import traceback
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 NAME = "macpad-x11"
 
@@ -69,7 +79,7 @@ DEFAULTS = {
     },
 }
 
-# Per-app pinch settings, used where neither apps.toml nor config.toml says otherwise.
+# Per-app pinch settings, used where neither apps.ini nor config.ini says otherwise.
 APP_DEFAULTS = {
     "zoom": "keys",
     # Modifier held during zoom wheel clicks.
@@ -121,7 +131,7 @@ def config_home():
 
 
 def config_path():
-    return os.path.join(config_home(), NAME, "config.toml")
+    return os.path.join(config_home(), NAME, "config.ini")
 
 
 def apps_paths():
@@ -129,72 +139,102 @@ def apps_paths():
     here = os.path.dirname(os.path.realpath(__file__))
     data_home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     data_dirs = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
-    return [os.path.join(here, "apps.toml")] + [os.path.join(d, NAME, "apps.toml") for d in [data_home, *data_dirs]]
+    return [os.path.join(here, "apps.ini")] + [os.path.join(d, NAME, "apps.ini") for d in [data_home, *data_dirs]]
 
 
-def read_toml(path):
+# App entries are sections named "app <WM_CLASS name or glob>".
+APP_SECTION = "app "
+TRUE, FALSE = ("1", "yes", "true", "on"), ("0", "no", "false", "off")
+
+
+def read_ini(path):
+    """Return {section: {key: raw string}} of an INI file, or None if it is missing or broken."""
+    parser = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"),
+                                       default_section="\0")
     try:
-        with open(path, "rb") as f:
-            return tomllib.load(f)
+        with open(path, encoding="utf-8") as f:
+            parser.read_file(f)
     except FileNotFoundError:
         return None
-    except (OSError, tomllib.TOMLDecodeError) as e:
+    except (OSError, UnicodeDecodeError, configparser.Error) as e:
         warn(f"ignoring {path}: {e}")
         return None
+    return {section: dict(parser[section]) for section in parser.sections()}
+
+
+def convert(raw, default):
+    """Convert an INI string to the type of default; raise ValueError if it does not fit."""
+    value = raw.strip()
+    # Accept quotes, as in TOML: zoom = "touch".
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    if isinstance(default, bool):
+        if value.lower() in TRUE:
+            return True
+        if value.lower() in FALSE:
+            return False
+        raise ValueError("expected yes or no")
+    if isinstance(default, int):
+        return int(value)
+    if isinstance(default, float):
+        return float(value)
+    return value
 
 
 def checked(table, defaults, where):
-    """Return the entries of table that are known keys with valid values."""
+    """Return the entries of table that are known keys with valid values, converted."""
     out = {}
-    if not isinstance(table, dict):
-        warn(f"{where} must be a table")
-        return out
-    for key, value in table.items():
+    for key, raw in table.items():
         if key not in defaults:
             warn(f"unknown key '{key}' in {where}")
-        elif type(value) is not type(defaults[key]) and not (
-                isinstance(defaults[key], float) and isinstance(value, int) and not isinstance(value, bool)):
-            warn(f"'{key}' has the wrong type in {where}")
-        elif key in CHOICES and value not in CHOICES[key]:
-            warn(f"'{key}' must be one of {', '.join(map(repr, CHOICES[key]))} in {where}")
+            continue
+        try:
+            value = convert(raw, defaults[key])
+        except ValueError:
+            warn(f"bad value '{raw}' for '{key}' in {where}")
+            continue
+        if key in CHOICES and value not in CHOICES[key]:
+            warn(f"'{key}' must be one of {', '.join(c or '(empty)' for c in CHOICES[key])} in {where}")
         else:
             out[key] = value
     return out
+
+
+def app_sections(ini, path):
+    """Yield (WM_CLASS name or glob, table) of the app sections of ini."""
+    for section, table in ini.items():
+        if section.startswith(APP_SECTION) and section[len(APP_SECTION):].strip():
+            yield section[len(APP_SECTION):].strip(), table
 
 
 def load_config():
     """Return (settings by section, default app settings, {WM_CLASS: app settings})."""
     apps = {}
     for path in apps_paths():
-        db = read_toml(path)
+        db = read_ini(path)
         if db is not None:
-            for cls, table in db.items():
-                apps[cls] = checked(table, APP_DEFAULTS, f"[{cls}] of {path}")
+            for name, table in app_sections(db, path):
+                apps[name] = checked(table, APP_DEFAULTS, f"[{APP_SECTION}{name}] of {path}")
+            for section in db:
+                if not section.startswith(APP_SECTION):
+                    warn(f"unknown section [{section}] in {path}")
             break
     else:
-        warn("apps.toml not found; every app gets the default zoom method")
+        warn("apps.ini not found; every app gets the default zoom method")
 
     conf = {section: dict(values) for section, values in DEFAULTS.items()}
     default_app = dict(APP_DEFAULTS)
     path = config_path()
-    user = read_toml(path)
-    if user is None:
-        # Settings of three-finger-drag, which this program grew out of.
-        legacy = os.path.join(config_home(), "three-finger-drag", "config.toml")
-        old = read_toml(legacy)
-        if old:
-            warn(f"using {legacy} as [drag]; move it to {path}")
-            user = {"drag": old}
-    user = user or {}
-    for section in DEFAULTS:
-        table = dict(user.pop(section, None) or {})
-        if section == "pinch":
-            default_app.update(checked(table.pop("default", None) or {}, APP_DEFAULTS, f"[pinch.default] of {path}"))
-        conf[section].update(checked(table, DEFAULTS[section], f"[{section}] of {path}"))
-    for cls, table in (user.pop("apps", None) or {}).items():
-        apps[cls] = {**apps.get(cls, {}), **checked(table, APP_DEFAULTS, f"[apps.{cls}] of {path}")}
-    for key in user:
-        warn(f"unknown key '{key}' in {path}")
+    user = read_ini(path) or {}
+    for section, table in user.items():
+        if section in DEFAULTS:
+            conf[section].update(checked(table, DEFAULTS[section], f"[{section}] of {path}"))
+        elif section == "pinch.default":
+            default_app.update(checked(table, APP_DEFAULTS, f"[{section}] of {path}"))
+        elif not section.startswith(APP_SECTION):
+            warn(f"unknown section [{section}] in {path}")
+    for name, table in app_sections(user, path):
+        apps[name] = {**apps.get(name, {}), **checked(table, APP_DEFAULTS, f"[{APP_SECTION}{name}] of {path}")}
     return conf, default_app, apps
 
 
@@ -699,7 +739,7 @@ def reload(*_):
 
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
-# Reload the config file and apps.toml (enabling or disabling a feature needs a restart).
+# Reload the config file and apps.ini (enabling or disabling a feature needs a restart).
 signal.signal(signal.SIGHUP, reload)
 # Release the drag immediately (e.g. from another gesture tool).
 signal.signal(signal.SIGUSR1, lambda *_: drag and drag.release())
