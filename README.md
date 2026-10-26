@@ -58,6 +58,10 @@ systemctl --user start macpad-x11.service   # or just log in again
 `makepkg` downloads the tagged release and installs the dependencies. The
 package replaces three-finger-drag. Uninstall with `sudo pacman -R macpad-x11`.
 
+Once installed, the clone is no longer needed and you can delete it: the
+package lives in `/usr`, and uninstalling needs only pacman. To update,
+`git pull` in the clone (or clone again) and run `makepkg -si` once more.
+
 ### Debian / Ubuntu
 
 Download `macpad-x11_*_all.deb` from the
@@ -92,11 +96,17 @@ cd macpad-x11
 ```
 
 This installs into `~/.local`, registers a systemd user service and an XDG
-autostart entry, and starts the daemon. To remove macpad-x11:
+autostart entry, and starts the daemon. No root is needed. To remove
+macpad-x11:
 
 ```sh
 ./install.sh --uninstall
 ```
+
+install.sh copies the files, so macpad-x11 keeps working if you delete the
+clone. Keep it anyway if you can: updating (`git pull && ./install.sh`) and
+uninstalling run from the clone, and with the clone gone you have to clone
+again first. Your config in `~/.config/macpad-x11` is never touched.
 
 ## Configuration
 

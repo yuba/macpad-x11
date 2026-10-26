@@ -50,6 +50,10 @@ systemctl --user start macpad-x11.service   # またはログインし直す
 `makepkg` がタグ付きリリースのダウンロードと依存パッケージのインストールを行います。
 このパッケージは three-finger-drag を置き換えます。アンインストールは `sudo pacman -R macpad-x11` です。
 
+インストールが終われば、clone したディレクトリは不要で、削除しても構いません。パッケージは `/usr` に入り、
+アンインストールも pacman だけでできます。更新するときは、clone したディレクトリで `git pull` してから
+（削除していれば clone し直してから）、もう一度 `makepkg -si` を実行します。
+
 ### Debian / Ubuntu
 
 [最新リリース](https://github.com/yuba/macpad-x11/releases/latest) から `macpad-x11_*_all.deb` をダウンロードして:
@@ -81,11 +85,16 @@ cd macpad-x11
 ```
 
 `~/.local` へのインストール、systemd ユーザーサービスと XDG autostart の登録、
-デーモンの起動までを行います。アンインストールは:
+デーモンの起動までを行います。root 権限は不要です。アンインストールは:
 
 ```sh
 ./install.sh --uninstall
 ```
+
+install.sh はファイルをコピーするので、clone したディレクトリを削除しても macpad-x11 は動き続けます。
+ただし、できれば残しておいてください。更新（`git pull && ./install.sh`）もアンインストールも
+clone したディレクトリから実行するため、削除した場合は先に clone し直す必要があります。
+`~/.config/macpad-x11` の設定ファイルは、どの操作でも変更されません。
 
 ## 設定
 
