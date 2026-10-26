@@ -1,6 +1,6 @@
 # Maintainer: yuba <m.takuma@gmail.com>
 pkgname=macpad-x11
-pkgver=0.5.0
+pkgver=0.5.1
 pkgrel=1
 pkgdesc="macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching, show desktop and launcher"
 arch=('any')
@@ -11,7 +11,8 @@ provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('fc74ed4d0270e915f6e7b172f8c21d1d11e71b41caedfab1d8eaf763dfb74eb5')
+# Pinned in a follow-up commit once the tag exists (updpkgsums).
+sha256sums=('SKIP')
 install=$pkgname.install
 
 package() {

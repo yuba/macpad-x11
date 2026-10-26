@@ -171,7 +171,7 @@ def pinch4(p, *scales, fingers=4, cancelled=False):
 
 
 p4conf = dict(conf["pinch4"], launcher_keys="super", launcher_command="")
-assert "xfce4-popup-whiskermenu ||" in conf["pinch4"]["launcher_command"].splitlines()
+assert conf["pinch4"]["launcher_command"].splitlines()[0] == 'case "$XDG_CURRENT_DESKTOP" in'
 xs = FakeShowDesktop()
 p4 = g["FourPinch"](xs, p4conf, None)
 pinch4(p4, 0.9, 0.6)                       # pinch in: launcher

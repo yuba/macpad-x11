@@ -67,7 +67,7 @@ install_files
 info "installed $BIN_DIR/$NAME"
 info "config: $CONF_DIR/config.ini"
 if [ -n "${DISPLAY:-}" ]; then
-  systemctl --user import-environment DISPLAY XAUTHORITY 2>/dev/null || true
+  systemctl --user import-environment DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP 2>/dev/null || true
   systemctl --user restart "$NAME.service"
   info "started. It will start automatically at login."
 else

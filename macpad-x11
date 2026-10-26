@@ -49,7 +49,7 @@ import subprocess
 import time
 import traceback
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 NAME = "macpad-x11"
 
@@ -104,16 +104,18 @@ DEFAULTS = {
         # Keys to press when pinching in, e.g. "super" or "ctrl+escape".
         "launcher_keys": "",
         # Shell command to run when pinching in, after the keys. Run with
-        # sh -c as written, so ";", "||" and newlines work as in a shell.
+        # sh -c as written, so ";", "||" and newlines work as in a shell. The
+        # default picks the launcher by desktop rather than by exit codes,
+        # which do not tell reliably whether a launcher opened.
         "launcher_command": "\n".join((
-            "xfce4-popup-whiskermenu ||",
-            "xfce4-popup-applicationsmenu ||",
-            "qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ||",
-            "qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ||",
-            "gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell"
-            " --method org.gnome.Shell.ShowApplications ||",
-            "rofi -show drun ||",
-            "xfce4-appfinder",
+            'case "$XDG_CURRENT_DESKTOP" in',
+            "*XFCE*) xfce4-popup-whiskermenu || xfce4-popup-applicationsmenu ;;",
+            "*KDE*) qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ||",
+            "qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ;;",
+            "*GNOME*) gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell"
+            " --method org.gnome.Shell.ShowApplications ;;",
+            "*) if command -v rofi >/dev/null; then rofi -show drun; else xfce4-appfinder; fi ;;",
+            "esac",
         )),
         # Show the gathering and spreading fingertips while pinching.
         "hud": True,

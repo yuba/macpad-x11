@@ -2,7 +2,7 @@
 Type=Application
 Name=macpad-x11
 Comment=macOS-style touchpad gestures for X11
-Exec=sh -c 'systemctl --user import-environment DISPLAY XAUTHORITY && systemctl --user start macpad-x11.service'
+Exec=sh -c 'systemctl --user import-environment DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP && systemctl --user start macpad-x11.service'
 NoDisplay=true
 StartupNotify=false
 Terminal=false
