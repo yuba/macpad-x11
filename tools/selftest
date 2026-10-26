@@ -76,4 +76,74 @@ d = g["Drag"](x, drag_conf)
 feed(d, B, E, B, E, M)
 assert d.state == d.IDLE and [e for e in x.log if e[0] == "button"] == [("button", 1, True), ("button", 1, False)]
 
+class FakeDesktops:
+    def __init__(self, number, current, layout=(0, 0, 1)):
+        self.number, self.current, self.layout = number, current, layout
+        self.switched = []
+
+    def desktops(self):
+        return self.number, self.current, self.layout
+
+    def switch_desktop(self, index):
+        self.switched.append(index)
+        self.current = index
+
+
+class FakeHud:
+    shown = False
+
+    def __init__(self):
+        self.highlights = []
+
+    def show(self, positions, current, highlight):
+        self.shown = True
+        self.highlights.append(highlight)
+
+    def hide(self):
+        self.shown = False
+
+
+def swipe(s, *dxs, fingers=4, dy=0.5, cancelled=False):
+    feed(s, " event7   GESTURE_SWIPE_BEGIN     +1.000s\t%d" % fingers)
+    for dx in dxs:
+        feed(s, " event7   GESTURE_SWIPE_UPDATE   1 +1.100s\t%d %6.2f/%5.2f ( 0.00/ 0.00 unaccelerated)"
+             % (fingers, dx, dy))
+    feed(s, " event7   GESTURE_SWIPE_END       +1.500s\t%d%s" % (fingers, " cancelled" if cancelled else ""))
+
+
+swipe_conf = dict(conf["swipe"], distance=300.0)
+xd, hud = FakeDesktops(2, 0), FakeHud()
+s = g["Swipe"](xd, swipe_conf, hud)
+swipe(s, *[-15] * 24)                          # fingers left past half way: next desktop
+assert xd.switched == [1], xd.switched
+hud.highlights.clear()
+swipe(s, *[-15] * 24)                          # at the last desktop: rubber band only
+furthest = max(h[0] for h in hud.highlights)
+assert xd.switched == [1] and 1 < furthest < 1.2 and hud.highlights[-1] == (1, 0), (xd.switched, hud.highlights)
+swipe(s, *[15] * 6)                            # less than half way back: stay
+assert xd.switched == [1], xd.switched
+swipe(s, *[15] * 20, cancelled=True)           # cancelled by libinput: stay
+assert xd.switched == [1], xd.switched
+swipe(s, *[2] * 20, dy=5.0)                    # mostly vertical: ignored
+assert xd.switched == [1], xd.switched
+swipe(s, *[-15] * 24, fingers=3)               # other finger count: not ours
+assert xd.switched == [1], xd.switched
+swipe(s, *[15] * 20)                           # fingers right all the way: previous desktop
+assert xd.switched == [1, 0], xd.switched
+
+xd = FakeDesktops(3, 2)
+s = g["Swipe"](xd, dict(swipe_conf, wrap=True), None)
+swipe(s, *[-15] * 20)                          # wrap from the last desktop to the first
+assert xd.switched == [0], xd.switched
+s = g["Swipe"](xd, dict(swipe_conf, reverse=True), None)
+swipe(s, *[-15] * 20)                          # reversed: fingers left, desktop on the left
+assert xd.switched == [0], xd.switched
+
+xd = FakeDesktops(4, 1, (0, 2, 0))             # 2x2 grid; desktop 1 is top right
+s = g["Swipe"](xd, swipe_conf, None)
+swipe(s, *[-15] * 20)                          # nothing right of it in its row
+assert xd.switched == [], xd.switched
+swipe(s, *[15] * 20)                           # its left neighbour is desktop 0
+assert xd.switched == [0], xd.switched
+
 print("selftest passed on Python %d.%d.%d" % sys.version_info[:3])

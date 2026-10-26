@@ -13,8 +13,9 @@ priority: optional
 maintainer: yuba <m.takuma@gmail.com>
 description: |-
   macOS-style touchpad gestures for X11
-  Three-finger drag, and pinch to zoom around the pointer in browsers,
-  document and image viewers and graphics apps.
+  Three-finger drag, pinch to zoom around the pointer in browsers,
+  document and image viewers and graphics apps, and four-finger swipes
+  between desktops.
 vendor: yuba
 homepage: https://github.com/yuba/macpad-x11
 license: MIT
@@ -54,6 +55,7 @@ overrides:
       - libinput-tools
       - libx11-6
       - libxtst6
+      - libxext6
       - coreutils
   rpm:
     depends:
@@ -61,4 +63,5 @@ overrides:
       - libinput-utils
       - libX11
       - libXtst
+      - libXext
       - coreutils

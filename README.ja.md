@@ -14,6 +14,9 @@ X11 上の Linux タッチパッドで、macOS のようなジェスチャーを
   X11 版 Chrome がタッチパッドのピンチを無視するにもかかわらず、ネイティブの滑らかなズームになります。
   その他のアプリはホイールやキーで操作します。どれを使うかは [apps.ini](apps.ini) に書かれていて、
   コードに触れずに自分でアプリを追加できます。
+- **四本指スワイプでデスクトップ切り替え。** 四本指で左右にスワイプすると、左右隣のデスクトップに移ります。
+  スワイプ中はデスクトップの一覧が小さく表示され、ハイライトが指に追従します。半分を過ぎてから指を離すと切り替わります。
+  EWMH のデスクトップに対応したウィンドウマネージャー（Xfwm4、KWin、Mutter、Openbox、i3 など）で動きます。
 - Python スクリプト 1 本。コンパイル不要、root デーモン不要、fusuma や touchegg も不要
 
 macpad-x11 は、ピンチを覚える前は three-finger-drag という名前でした。
@@ -23,7 +26,7 @@ macpad-x11 は、ピンチを覚える前は three-finger-drag という名前�
 - **X11** セッション（Wayland 非対応）
 - Python 3.8 以降（標準ライブラリのみ使用）
 - `libinput`（`libinput debug-events` コマンド。Debian/Ubuntu では `libinput-tools` パッケージ）
-- `libX11` と `libXtst`（Arch: `libx11 libxtst` / Debian・Ubuntu: `libx11-6 libxtst6` / Fedora: `libX11 libXtst`）
+- `libX11`、`libXtst`、`libXext`（Arch: `libx11 libxtst libxext` / Debian・Ubuntu: `libx11-6 libxtst6 libxext6` / Fedora: `libX11 libXtst libXext`）
 - ユーザーが `input` グループに所属していること（タッチパッドの読み取りと、
   ピンチズーム用の仮想タッチスクリーンの作成に必要）
 
@@ -173,7 +176,8 @@ X が仮想の指をマウスのドラッグとして扱ってしまいます。
 ## 競合
 
 fusuma、touchegg、libinput-gestures、デスクトップ環境自身のジェスチャーなどで
-三本指スワイプや二本指ピンチに割り当てがあれば無効にしてください。同じジェスチャーに両方が反応します。
+三本指・四本指スワイプや二本指ピンチに割り当てがあれば無効にしてください。同じジェスチャーに両方が反応します。
+macpad-x11 の各機能は、config.ini のそれぞれのセクションで `enabled = no` にすれば止められます。
 
 ## 仕組み
 
@@ -192,6 +196,13 @@ fusuma、touchegg、libinput-gestures、デスクトップ環境自身のジェ�
 一本目の指（＝ポインター）の下の場所が動かず、X はカーソルを一本目のタッチ位置に動かすので
 カーソルも飛びません。指を動かすと二本の仮想の指が一緒に動き、パンになります。
 短い二本指タッチは右クリック扱いされるため、小さなピンチは少し動いてから始めます。
+
+**スワイプ。** 四本指の `GESTURE_SWIPE_BEGIN` で、ルートウィンドウからデスクトップの数・現在のデスクトップ・並び
+（`_NET_NUMBER_OF_DESKTOPS`、`_NET_CURRENT_DESKTOP`、`_NET_DESKTOP_LAYOUT`）を読みます。
+指が動いている間は、クリックを透過する override-redirect ウィンドウにデスクトップを並べて描きます
+（コンポジターが動いていれば半透明）。`distance` の半分を過ぎて指を離すと、EWMH の
+`_NET_CURRENT_DESKTOP` クライアントメッセージでウィンドウマネージャーに隣のデスクトップへの切り替えを頼みます。
+デスクトップ自体が指に合わせて滑ることはありません。X11 では表示していないデスクトップの画面が得られないためです。
 
 ## トラブルシューティング
 

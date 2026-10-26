@@ -16,6 +16,11 @@ macOS-style touchpad gestures for Linux on X11.
   though Chrome on X11 ignores touchpad pinches. Other apps are driven with
   wheel clicks or keys; [apps.ini](apps.ini) says which, and you can add
   your own apps without touching any code.
+- **Four-finger swipe between desktops.** Swipe sideways with four fingers
+  to go to the desktop on the left or right. A small overlay shows the
+  desktops while you swipe, with a highlight that follows your fingers; let
+  go past half way to switch. Works with any window manager that supports
+  EWMH desktops (Xfwm4, KWin, Mutter, Openbox, i3, ...).
 - One small Python script. No compilation, no root daemon, no fusuma or
   touchegg needed.
 
@@ -27,8 +32,9 @@ macpad-x11 was called three-finger-drag before it learned to pinch.
 - Python 3.8 or later (standard library only)
 - `libinput` (the `libinput debug-events` command — on Debian/Ubuntu it is in
   the `libinput-tools` package)
-- `libX11` and `libXtst` (`libx11 libxtst` on Arch, `libx11-6 libxtst6` on
-  Debian/Ubuntu, `libX11 libXtst` on Fedora)
+- `libX11`, `libXtst` and `libXext` (`libx11 libxtst libxext` on Arch,
+  `libx11-6 libxtst6 libxext6` on Debian/Ubuntu, `libX11 libXtst libXext` on
+  Fedora)
 - Your user in the `input` group (to read the touchpad and to create the
   virtual touchscreen used for pinch zoom):
 
@@ -188,9 +194,10 @@ please attach the `probe.png` contact sheet.
 
 ## Conflicts
 
-Disable other bindings for three-finger swipes and two-finger pinches
-(fusuma, touchegg, libinput-gestures, your desktop's own gestures);
-otherwise both will act on the same gesture.
+Disable other bindings for three- and four-finger swipes and two-finger
+pinches (fusuma, touchegg, libinput-gestures, your desktop's own gestures);
+otherwise both will act on the same gesture. Each feature can be turned off
+with `enabled = no` in its section of config.ini.
 
 ## How it works
 
@@ -216,6 +223,16 @@ the cursor to the first touch, the cursor does not jump either. Moving your
 fingers moves both virtual fingers, which pans. Small pinches start only
 after a short distance, since apps take a short two-finger touch for a
 right-click.
+
+**Swipe.** At a four-finger `GESTURE_SWIPE_BEGIN` the daemon reads the
+number of desktops, the current one and their layout from the root window
+(`_NET_NUMBER_OF_DESKTOPS`, `_NET_CURRENT_DESKTOP`, `_NET_DESKTOP_LAYOUT`).
+While the fingers move, an override-redirect window that lets clicks
+through draws the desktops as tiles, translucent when a compositor runs.
+When the fingers lift past half of `distance`, it asks the window manager
+for the neighbour with an EWMH `_NET_CURRENT_DESKTOP` client message. The
+desktops themselves do not slide along: X11 has no picture of a desktop that
+is not shown.
 
 ## Troubleshooting
 
