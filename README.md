@@ -21,6 +21,12 @@ macOS-style touchpad gestures for Linux on X11.
   desktops while you swipe, with a highlight that follows your fingers; let
   go past half way to switch. Works with any window manager that supports
   EWMH desktops (Xfwm4, KWin, Mutter, Openbox, i3, ...).
+- **Four-finger pinch: show the desktop, open a launcher.** Spread your
+  thumb and three fingers to hide all windows and show the desktop; pinch
+  them in to bring the windows back, or, when windows are out, to open your
+  desktop's launcher (any keys or shell command you like). Four circles in
+  the middle of the screen gather or spread with your fingers and turn
+  solid yellow once the pinch is far enough.
 - One small Python script. No compilation, no root daemon, no fusuma or
   touchegg needed.
 
@@ -115,13 +121,13 @@ again first. Your config in `~/.config/macpad-x11` is never touched.
 
 ```ini
 [drag]
-timeout = 0.5      ; grace period (s) after lifting the fingers
-speed = 3.0        ; pointer movement per unit of swipe movement
+timeout = 0.5      # grace period (s) after lifting the fingers
+speed = 3.0        # pointer movement per unit of swipe movement
 
 [pinch]
 enabled = yes
 
-[app Some-app]     ; WM_CLASS class or instance name; overrides apps.ini
+[app Some-app]     # WM_CLASS class or instance name; overrides apps.ini
 zoom = wheel
 modifier = ctrl
 step = 1.1
@@ -204,8 +210,8 @@ please attach the `probe.png` contact sheet.
 
 ## Conflicts
 
-Disable other bindings for three- and four-finger swipes and two-finger
-pinches (fusuma, touchegg, libinput-gestures, your desktop's own gestures);
+Disable other bindings for three- and four-finger swipes and two- and
+four-finger pinches (fusuma, touchegg, libinput-gestures, your desktop's own gestures);
 otherwise both will act on the same gesture. Each feature can be turned off
 with `enabled = no` in its section of config.ini.
 
@@ -243,6 +249,14 @@ When the fingers lift past half of `distance`, it asks the window manager
 for the neighbour with an EWMH `_NET_CURRENT_DESKTOP` client message. The
 desktops themselves do not slide along: X11 has no picture of a desktop that
 is not shown.
+
+**Four-finger pinch.** The desktop is shown and hidden with EWMH
+`_NET_SHOWING_DESKTOP`, and macpad-x11 keeps no state of its own: a pinch in
+brings the windows back while the window manager is still showing the
+desktop, and opens the launcher otherwise (the window manager leaves "show
+desktop" by itself when a window appears). The launcher command runs with
+`sh -c`, in its own session. libinput reports at most four fingers for a
+pinch, so a five-finger pinch counts as four.
 
 ## Troubleshooting
 

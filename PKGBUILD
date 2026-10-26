@@ -1,8 +1,8 @@
 # Maintainer: yuba <m.takuma@gmail.com>
 pkgname=macpad-x11
-pkgver=0.4.1
+pkgver=0.5.0
 pkgrel=1
-pkgdesc="macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching"
+pkgdesc="macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching, show desktop and launcher"
 arch=('any')
 url="https://github.com/yuba/macpad-x11"
 license=('MIT')
@@ -11,7 +11,8 @@ provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('66172085cc2fbc0dca43841aba3a294580bc2cb5ad5363d3d6356ab09fdb4c9e')
+# Pinned in a follow-up commit once the tag exists (updpkgsums).
+sha256sums=('SKIP')
 install=$pkgname.install
 
 package() {

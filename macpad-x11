@@ -49,7 +49,7 @@ import subprocess
 import time
 import traceback
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 NAME = "macpad-x11"
 
@@ -89,6 +89,34 @@ DEFAULTS = {
         "hud": True,
         # Move the other way: fingers to the left go to the desktop on the left.
         "reverse": False,
+    },
+    "pinch4": {
+        "enabled": True,
+        # Number of fingers. libinput reports at most four for a pinch.
+        "fingers": 4,
+        # Spreading the fingers to this scale shows the desktop.
+        "out_scale": 1.5,
+        # Pinching them to this scale opens the launcher, or brings the
+        # windows back if the desktop is shown.
+        "in_scale": 0.7,
+        # Spread to show the desktop (EWMH _NET_SHOWING_DESKTOP).
+        "show_desktop": True,
+        # Keys to press when pinching in, e.g. "super" or "ctrl+escape".
+        "launcher_keys": "",
+        # Shell command to run when pinching in, after the keys. Run with
+        # sh -c as written, so ";", "||" and newlines work as in a shell.
+        "launcher_command": "\n".join((
+            "xfce4-popup-whiskermenu ||",
+            "xfce4-popup-applicationsmenu ||",
+            "qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ||",
+            "qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.activateLauncherMenu ||",
+            "gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell"
+            " --method org.gnome.Shell.ShowApplications ||",
+            "rofi -show drun ||",
+            "xfce4-appfinder",
+        )),
+        # Show the gathering and spreading fingertips while pinching.
+        "hud": True,
     },
 }
 
@@ -157,13 +185,18 @@ def apps_paths():
 
 # App entries are sections named "app <WM_CLASS name or glob>".
 APP_SECTION = "app "
+# Values passed on as written, comments included: a shell reads them.
+VERBATIM = {"launcher_command"}
+# A comment after a value: whitespace, then "#".
+INLINE_COMMENT_RE = re.compile(r"(^|\s)#.*$", re.S)
 TRUE, FALSE = ("1", "yes", "true", "on"), ("0", "no", "false", "off")
 
 
 def read_ini(path):
     """Return {section: {key: raw string}} of an INI file, or None if it is missing or broken."""
-    parser = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"),
-                                       default_section="\0")
+    # Comments after values are stripped in checked(), as some values are shell
+    # commands where ";" and "#" mean something.
+    parser = configparser.ConfigParser(interpolation=None, default_section="\0")
     try:
         with open(path, encoding="utf-8") as f:
             parser.read_file(f)
@@ -201,6 +234,8 @@ def checked(table, defaults, where):
         if key not in defaults:
             warn(f"unknown key '{key}' in {where}")
             continue
+        if key not in VERBATIM:
+            raw = INLINE_COMMENT_RE.sub("", raw)
         try:
             value = convert(raw, defaults[key])
         except ValueError:
@@ -357,8 +392,8 @@ x11.XSetForeground.argtypes = [ctypes.c_void_p, GC, ctypes.c_ulong]
 x11.XSetLineAttributes.argtypes = [ctypes.c_void_p, GC, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 x11.XFillRectangle.argtypes = x11.XDrawRectangle.argtypes = [ctypes.c_void_p, Drawable, GC, ctypes.c_int,
                                                              ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
-x11.XFillArc.argtypes = [ctypes.c_void_p, Drawable, GC, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
-                         ctypes.c_int, ctypes.c_int]
+x11.XFillArc.argtypes = x11.XDrawArc.argtypes = [ctypes.c_void_p, Drawable, GC, ctypes.c_int, ctypes.c_int,
+                                                 ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_int]
 x11.XCopyArea.argtypes = [ctypes.c_void_p, Drawable, Drawable, GC, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
                           ctypes.c_uint, ctypes.c_int, ctypes.c_int]
 # libXext comes with libXtst; it makes the overlay let clicks through.
@@ -394,10 +429,21 @@ class X:
         self._mods(mods, False)
         self.flush()
 
+    def keysym(self, name):
+        """The keysym for a key name: an X keysym name ("Escape", "F1", "plus"), case-insensitively
+        for the usual spellings ("escape", "f1"), or a modifier name alone ("super")."""
+        name = MODIFIER_KEYSYMS.get(name.lower(), name)
+        for candidate in (name, name.capitalize(), name.upper()):
+            keysym = x11.XStringToKeysym(candidate.encode())
+            if keysym:
+                return keysym
+        return 0
+
     def key(self, spec):
-        """Press and release spec, e.g. "ctrl+plus" (modifiers, then a keysym)."""
+        """Press and release spec, e.g. "ctrl+plus" or "super" (modifiers, then a key)."""
         *mods, name = spec.split("+") if not spec.endswith("++") else [*spec[:-2].split("+"), "plus"]
-        keysym = x11.XStringToKeysym(name.encode())
+        mods = [m.lower() for m in mods]
+        keysym = self.keysym(name)
         code = x11.XKeysymToKeycode(self.dpy, keysym) if keysym else 0
         if not code:
             warn(f"no key for '{name}' in '{spec}'")
@@ -506,19 +552,31 @@ class X:
         layout = self.cardinals(self.root, "_NET_DESKTOP_LAYOUT", 3)
         return number[0], current[0], tuple(layout) if len(layout) == 3 else (0, 0, 1)
 
-    def switch_desktop(self, index):
-        """Ask the window manager to show desktop index (EWMH _NET_CURRENT_DESKTOP)."""
+    def _ask_wm(self, message, *data):
+        """Send an EWMH client message about the root window to the window manager."""
         event = XEvent()
         msg = event.xclient
         msg.type = CLIENT_MESSAGE
         msg.window = self.root
-        msg.message_type = x11.XInternAtom(self.dpy, b"_NET_CURRENT_DESKTOP", False)
+        msg.message_type = x11.XInternAtom(self.dpy, message.encode(), False)
         msg.format = 32
-        msg.data[0] = index
-        msg.data[1] = 0    # CurrentTime
+        for i, value in enumerate(data):
+            msg.data[i] = value
         x11.XSendEvent(self.dpy, self.root, False, SUBSTRUCTURE_REDIRECT_MASK | SUBSTRUCTURE_NOTIFY_MASK,
                        ctypes.byref(event))
         self.flush()
+
+    def switch_desktop(self, index):
+        """Ask the window manager to show desktop index (EWMH _NET_CURRENT_DESKTOP)."""
+        self._ask_wm("_NET_CURRENT_DESKTOP", index, 0)    # 0: CurrentTime
+
+    def showing_desktop(self):
+        """Whether the window manager is in "show the desktop" mode (EWMH _NET_SHOWING_DESKTOP)."""
+        return self.cardinals(self.root, "_NET_SHOWING_DESKTOP", 1) == [1]
+
+    def show_desktop(self, on):
+        """Ask the window manager to hide all windows and show the desktop, or to bring them back."""
+        self._ask_wm("_NET_SHOWING_DESKTOP", 1 if on else 0)
 
     def composited(self):
         """Whether a compositing manager runs, so that translucent windows work."""
@@ -594,18 +652,17 @@ class Touchscreen:
         os.close(self.fd)
 
 
-# --- desktop switcher HUD ---------------------------------------------------
+# --- overlays ---------------------------------------------------------------
 
-class Hud:
-    """An overlay showing the desktops as tiles, with a highlight that follows the fingers.
+class Overlay:
+    """A window drawn over everything while a gesture runs.
 
     An override-redirect window, so the window manager leaves it alone, drawn
     with core X requests into a pixmap and copied over in one go. Translucent
     when a compositor runs, opaque otherwise. Clicks go through it.
     """
-    # The panel sits in the middle of the screen, at most this share of its
-    # width and height; the tiles get the largest size that fits.
-    MAX_W, MAX_H = 0.4, 0.2
+    # Panel color, also what translucent colors are blended over without a compositor.
+    PANEL = (24, 26, 30)
 
     def __init__(self, x):
         self.x = x
@@ -631,40 +688,30 @@ class Hud:
         xext.XShapeCombineRectangles(dpy, self.win, SHAPE_INPUT, 0, 0, None, 0, SHAPE_SET, 0)
         self.gc = x11.XCreateGC(dpy, self.win, 0, None)
         self.pixmap = 0
-        self.grid = None    # (columns, rows) the panel is laid out for
         self.size = (0, 0)
         self.shown = False
 
-    def layout(self, cols, rows):
-        """Size the tiles, gaps and panel for a cols x rows grid of desktops."""
-        sw, sh = self.x.width, self.x.height
-        max_w, max_h = sw * self.MAX_W, sh * self.MAX_H
-        # Padding and gaps scale with the panel; tiles keep the screen's shape.
-        self.pad = round(max_h * 0.1)
-        self.gap = round(self.pad * 0.6)
-        fit_w = (max_w - 2 * self.pad - (cols - 1) * self.gap) / cols
-        fit_h = (max_h - 2 * self.pad - (rows - 1) * self.gap) / rows * sw / sh
-        self.cell_w = max(8, int(min(fit_w, fit_h)))
-        self.cell_h = max(5, round(self.cell_w * sh / sw))
-        self.cell_r = max(3, round(self.cell_w * 0.05))
-        self.line = max(2, round(self.cell_w / 80))
-        w = cols * self.cell_w + (cols - 1) * self.gap + 2 * self.pad
-        h = rows * self.cell_h + (rows - 1) * self.gap + 2 * self.pad
+    def place(self, w, h):
+        """Make the window w x h, centered on the screen, with a fresh pixmap."""
         dpy = self.x.dpy
         if self.pixmap:
             x11.XFreePixmap(dpy, self.pixmap)
         self.pixmap = x11.XCreatePixmap(dpy, self.win, w, h, self.depth)
-        x11.XMoveResizeWindow(dpy, self.win, (sw - w) // 2, (sh - h) // 2, w, h)
-        self.grid, self.size = (cols, rows), (w, h)
+        x11.XMoveResizeWindow(dpy, self.win, (self.x.width - w) // 2, (self.x.height - h) // 2, w, h)
+        self.size = (w, h)
 
     def pixel(self, r, g, b, a=255):
         if self.argb:
             # Premultiplied alpha.
             return (a << 24) | (r * a // 255 << 16) | (g * a // 255 << 8) | (b * a // 255)
         # Opaque: blend over the panel color by hand.
-        pr, pg, pb = 24, 26, 30
-        r, g, b = (round(c * a / 255 + p * (255 - a) / 255) for c, p in ((r, pr), (g, pg), (b, pb)))
+        r, g, b = (round(c * a / 255 + p * (255 - a) / 255) for c, p in zip((r, g, b), self.PANEL))
         return (r << 16) | (g << 8) | b
+
+    def clear(self):
+        """Start a frame: transparent with a compositor, the panel color without."""
+        x11.XSetForeground(self.x.dpy, self.gc, 0 if self.argb else self.pixel(*self.PANEL))
+        x11.XFillRectangle(self.x.dpy, self.pixmap, self.gc, 0, 0, *self.size)
 
     def rounded(self, x, y, w, h, radius, color):
         dpy, d, gc = self.x.dpy, self.pixmap, self.gc
@@ -675,33 +722,10 @@ class Hud:
         for cx, cy in ((x, y), (x + w - 2 * radius, y), (x, y + h - 2 * radius), (x + w - 2 * radius, y + h - 2 * radius)):
             x11.XFillArc(dpy, d, gc, cx, cy, 2 * radius, 2 * radius, 0, 360 * 64)
 
-    def show(self, positions, current, highlight):
-        """Draw tiles at positions [(column, row)], outline current, and the highlight at (column, row)."""
-        grid = (max(c for c, _ in positions) + 1, max(r for _, r in positions) + 1)
-        if grid != self.grid:
-            self.layout(*grid)
-        w, h = self.size
+    def present(self):
+        """Copy the frame to the window, mapping it first if needed."""
         dpy = self.x.dpy
-
-        def cell(c, r):
-            return (round(self.pad + c * (self.cell_w + self.gap)), round(self.pad + r * (self.cell_h + self.gap)))
-
-        x11.XSetForeground(dpy, self.gc, 0)
-        x11.XFillRectangle(dpy, self.pixmap, self.gc, 0, 0, w, h)
-        self.rounded(0, 0, w, h, self.pad, self.pixel(24, 26, 30, 215))
-        for c, r in positions:
-            self.rounded(*cell(c, r), self.cell_w, self.cell_h, self.cell_r, self.pixel(255, 255, 255, 46))
-        # The rubber band past the last desktop may stretch into the padding, not beyond.
-        hx, hy = cell(*highlight)
-        margin = self.pad // 2
-        hx = min(max(hx, margin), w - margin - self.cell_w)
-        hy = min(max(hy, margin), h - margin - self.cell_h)
-        self.rounded(hx, hy, self.cell_w, self.cell_h, self.cell_r, self.pixel(10, 132, 255, 230))
-        cx, cy = cell(*positions[current])
-        x11.XSetForeground(dpy, self.gc, self.pixel(255, 255, 255, 230))
-        x11.XSetLineAttributes(dpy, self.gc, self.line, 0, 0, 0)
-        o = self.line + 1    # outline just outside the tile
-        x11.XDrawRectangle(dpy, self.pixmap, self.gc, cx - o, cy - o, self.cell_w + 2 * o - 1, self.cell_h + 2 * o - 1)
+        w, h = self.size
         x11.XCopyArea(dpy, self.pixmap, self.win, self.gc, 0, 0, w, h, 0, 0)
         if not self.shown:
             x11.XMapRaised(dpy, self.win)
@@ -726,6 +750,108 @@ class Hud:
         if self.colormap:
             x11.XFreeColormap(dpy, self.colormap)
         self.x.flush()
+
+
+class DesktopHud(Overlay):
+    """The desktops as tiles, with a highlight that follows the fingers."""
+    # The panel sits in the middle of the screen, at most this share of its
+    # width and height; the tiles get the largest size that fits.
+    MAX_W, MAX_H = 0.4, 0.2
+
+    def __init__(self, x):
+        super().__init__(x)
+        self.grid = None    # (columns, rows) the panel is laid out for
+
+    def layout(self, cols, rows):
+        """Size the tiles, gaps and panel for a cols x rows grid of desktops."""
+        sw, sh = self.x.width, self.x.height
+        max_w, max_h = sw * self.MAX_W, sh * self.MAX_H
+        # Padding and gaps scale with the panel; tiles keep the screen's shape.
+        self.pad = round(max_h * 0.1)
+        self.gap = round(self.pad * 0.6)
+        fit_w = (max_w - 2 * self.pad - (cols - 1) * self.gap) / cols
+        fit_h = (max_h - 2 * self.pad - (rows - 1) * self.gap) / rows * sw / sh
+        self.cell_w = max(8, int(min(fit_w, fit_h)))
+        self.cell_h = max(5, round(self.cell_w * sh / sw))
+        self.cell_r = max(3, round(self.cell_w * 0.05))
+        self.line = max(2, round(self.cell_w / 80))
+        self.place(cols * self.cell_w + (cols - 1) * self.gap + 2 * self.pad,
+                   rows * self.cell_h + (rows - 1) * self.gap + 2 * self.pad)
+        self.grid = (cols, rows)
+
+    def show(self, positions, current, highlight):
+        """Draw tiles at positions [(column, row)], outline current, and the highlight at (column, row)."""
+        grid = (max(c for c, _ in positions) + 1, max(r for _, r in positions) + 1)
+        if grid != self.grid:
+            self.layout(*grid)
+        w, h = self.size
+        dpy = self.x.dpy
+
+        def cell(c, r):
+            return (round(self.pad + c * (self.cell_w + self.gap)), round(self.pad + r * (self.cell_h + self.gap)))
+
+        self.clear()
+        self.rounded(0, 0, w, h, self.pad, self.pixel(*self.PANEL, 215))
+        for c, r in positions:
+            self.rounded(*cell(c, r), self.cell_w, self.cell_h, self.cell_r, self.pixel(255, 255, 255, 46))
+        # The rubber band past the last desktop may stretch into the padding, not beyond.
+        hx, hy = cell(*highlight)
+        margin = self.pad // 2
+        hx = min(max(hx, margin), w - margin - self.cell_w)
+        hy = min(max(hy, margin), h - margin - self.cell_h)
+        self.rounded(hx, hy, self.cell_w, self.cell_h, self.cell_r, self.pixel(10, 132, 255, 230))
+        cx, cy = cell(*positions[current])
+        x11.XSetForeground(dpy, self.gc, self.pixel(255, 255, 255, 230))
+        x11.XSetLineAttributes(dpy, self.gc, self.line, 0, 0, 0)
+        o = self.line + 1    # outline just outside the tile
+        x11.XDrawRectangle(dpy, self.pixmap, self.gc, cx - o, cy - o, self.cell_w + 2 * o - 1, self.cell_h + 2 * o - 1)
+        self.present()
+
+
+class FingerHud(Overlay):
+    """Four circles, like fingertips, that gather or spread with a pinch.
+
+    They sit at 0, 60, 120 and 180 degrees around the middle of the screen.
+    As the pinch nears the scale that triggers its action, their outline
+    thickens and turns from dim white to bright yellow, until they are solid
+    yellow discs.
+    """
+    ANGLES = (0, 60, 120, 180)
+    # Furthest the circles go, as a multiple of their resting distance.
+    MAX_SPREAD = 1.8
+
+    def __init__(self, x):
+        super().__init__(x)
+        short = min(x.width, x.height)
+        self.distance = short * 0.12     # resting distance of the circles from the middle
+        self.radius = round(short * 0.035)
+        side = 2 * round(self.distance * self.MAX_SPREAD + self.radius + 4)
+        self.place(side, side)
+
+    def show(self, scale, progress):
+        """Draw the circles at scale times their resting distance, progress (0..1) of the way to the action."""
+        dpy, r = self.x.dpy, self.radius
+        side = self.size[0]
+        dist = self.distance * min(max(scale, 0.0), self.MAX_SPREAD)
+        p = min(max(progress, 0.0), 1.0)
+        # Dim white to the brightest yellow.
+        color = self.pixel(round(170 + 85 * p), round(170 + 85 * p), round(170 * (1 - p)), round(150 + 105 * p))
+        width = round(3 + p * (r - 3))
+        self.clear()
+        x11.XSetForeground(dpy, self.gc, color)
+        x11.XSetLineAttributes(dpy, self.gc, width, 0, 0, 0)
+        for angle in self.ANGLES:
+            a = math.radians(angle)
+            cx = side / 2 + dist * math.cos(a)
+            cy = side / 2 - dist * math.sin(a)
+            if p >= 1:
+                x11.XFillArc(dpy, self.pixmap, self.gc, round(cx - r), round(cy - r), 2 * r, 2 * r, 0, 360 * 64)
+            else:
+                # Keep the outer edge at radius r however thick the line.
+                inner = r - width / 2
+                x11.XDrawArc(dpy, self.pixmap, self.gc, round(cx - inner), round(cy - inner),
+                             round(2 * inner), round(2 * inner), 0, 360 * 64)
+        self.present()
 
 
 # --- gestures ---------------------------------------------------------------
@@ -1047,6 +1173,82 @@ class Swipe:
             self.hud.close()
 
 
+class FourPinch:
+    """Four-finger pinch: spread to show the desktop, pinch in to open a launcher.
+
+    Pinching in while the desktop is shown brings the windows back instead.
+    The window manager keeps that state (EWMH _NET_SHOWING_DESKTOP): it ends
+    it by itself when a window shows up, and then the launcher opens again.
+    """
+    # How long the HUD stays after the fingers are lifted, in seconds.
+    LINGER = 0.3
+
+    def __init__(self, x, conf, hud):
+        self.x, self.conf, self.hud = x, conf, hud
+        self.active = False
+        self.hide_at = None
+        # Launcher commands still running, reaped as they exit.
+        self.children = []
+
+    def deadline(self):
+        return self.hide_at
+
+    def tick(self, now):
+        self.children = [c for c in self.children if c.poll() is None]
+        if self.hide_at is not None and now >= self.hide_at:
+            self.hide_at = None
+            if self.hud:
+                self.hud.hide()
+
+    def handle(self, event, fingers, line):
+        if not event.startswith("GESTURE_PINCH_") or fingers != self.conf["fingers"]:
+            return
+        if event == "GESTURE_PINCH_BEGIN":
+            self.active, self.scale = True, 1.0
+        elif event == "GESTURE_PINCH_UPDATE" and self.active:
+            m = SCALE_RE.search(line)
+            if m and float(m.group(1)) > 0:
+                self.scale = float(m.group(1))
+                if self.hud:
+                    self.hide_at = None
+                    self.hud.show(self.scale, self.progress())
+        elif event == "GESTURE_PINCH_END" and self.active:
+            self.active = False
+            self.end(cancelled="cancelled" in line)
+
+    def progress(self):
+        """How far (0..1) the pinch is towards the scale that triggers its action."""
+        if self.scale < 1:
+            return (1 - self.scale) / (1 - self.conf["in_scale"])
+        return (self.scale - 1) / (self.conf["out_scale"] - 1)
+
+    def end(self, cancelled):
+        if not cancelled:
+            if self.scale >= self.conf["out_scale"]:
+                if self.conf["show_desktop"] and not self.x.showing_desktop():
+                    self.x.show_desktop(True)
+            elif self.scale <= self.conf["in_scale"]:
+                if self.x.showing_desktop():
+                    self.x.show_desktop(False)
+                else:
+                    self.launch()
+        if self.hud and self.hud.shown:
+            self.hide_at = time.monotonic() + self.LINGER
+
+    def launch(self):
+        if self.conf["launcher_keys"]:
+            self.x.key(self.conf["launcher_keys"])
+        command = self.conf["launcher_command"].strip()
+        if command:
+            # Its own session, so that it outlives a restart of this daemon.
+            self.children.append(subprocess.Popen(["sh", "-c", command], stdin=subprocess.DEVNULL,
+                                                  start_new_session=True))
+
+    def close(self):
+        if self.hud:
+            self.hud.close()
+
+
 # --- main -------------------------------------------------------------------
 
 if len(sys.argv) > 1:
@@ -1069,8 +1271,14 @@ if conf["swipe"]["enabled"]:
     if drag and conf["swipe"]["fingers"] == conf["drag"]["fingers"]:
         warn(f"[swipe] and [drag] both use {conf['drag']['fingers']} fingers; desktop switching is off")
     else:
-        swipe = Swipe(display, conf["swipe"], Hud(display) if conf["swipe"]["hud"] else None)
-features = [f for f in (drag, pinch, swipe) if f]
+        swipe = Swipe(display, conf["swipe"], DesktopHud(display) if conf["swipe"]["hud"] else None)
+pinch4 = None
+if conf["pinch4"]["enabled"]:
+    if pinch and conf["pinch4"]["fingers"] == 2:
+        warn("[pinch4] uses 2 fingers like [pinch]; the four-finger pinch is off")
+    else:
+        pinch4 = FourPinch(display, conf["pinch4"], FingerHud(display) if conf["pinch4"]["hud"] else None)
+features = [f for f in (drag, pinch, swipe, pinch4) if f]
 failed = set()
 
 
@@ -1095,6 +1303,8 @@ def shutdown(*_):
         pinch.close()
     if swipe:
         swipe.close()
+    if pinch4:
+        pinch4.close()
     sys.exit(0)
 
 
@@ -1107,6 +1317,8 @@ def reload(*_):
         pinch.configure(new_conf["pinch"], new_default, new_apps)
     if swipe:
         swipe.conf = new_conf["swipe"]
+    if pinch4:
+        pinch4.conf = new_conf["pinch4"]
 
 
 signal.signal(signal.SIGTERM, shutdown)
@@ -1124,7 +1336,7 @@ libinput = subprocess.Popen(
 fd = libinput.stdout.fileno()
 buf = b""
 
-timed = [f for f in (drag, swipe) if f]
+timed = [f for f in (drag, swipe, pinch4) if f]
 while True:
     deadlines = [d for d in (f.deadline() for f in timed) if d is not None]
     wait = max(0.0, min(deadlines) - time.monotonic()) if deadlines else None
@@ -1142,6 +1354,8 @@ while True:
             pinch.close()
         if swipe:
             swipe.close()
+        if pinch4:
+            pinch4.close()
         sys.exit(f"{NAME}: libinput debug-events exited (is the user in the 'input' group?)")
     *lines, buf = (buf + chunk).split(b"\n")
     for line in lines:
