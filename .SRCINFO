@@ -1,6 +1,6 @@
 pkgbase = macpad-x11
-	pkgdesc = macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching
-	pkgver = 0.4.1
+	pkgdesc = macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching, show desktop and launcher
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/yuba/macpad-x11
 	install = macpad-x11.install
@@ -15,7 +15,7 @@ pkgbase = macpad-x11
 	provides = three-finger-drag
 	conflicts = three-finger-drag
 	replaces = three-finger-drag
-	source = macpad-x11-0.4.1.tar.gz::https://github.com/yuba/macpad-x11/archive/refs/tags/v0.4.1.tar.gz
-	sha256sums = 66172085cc2fbc0dca43841aba3a294580bc2cb5ad5363d3d6356ab09fdb4c9e
+	source = macpad-x11-0.5.0.tar.gz::https://github.com/yuba/macpad-x11/archive/refs/tags/v0.5.0.tar.gz
+	sha256sums = fc74ed4d0270e915f6e7b172f8c21d1d11e71b41caedfab1d8eaf763dfb74eb5
 
 pkgname = macpad-x11
