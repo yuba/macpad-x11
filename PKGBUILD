@@ -11,7 +11,7 @@ provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('5a24d4f995c55b644344a63f3803a96722a2c4d9a305a17d6f0f635a17e8416e')
+sha256sums=('b34be29b208701c4744fcb1d70a3725e492e53ac95930de82713faa9254e9f7c')
 install=$pkgname.install
 
 package() {
