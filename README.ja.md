@@ -21,6 +21,10 @@ X11 上の Linux タッチパッドで、macOS のようなジェスチャーを
   つまむとウィンドウを元に戻します。ウィンドウが出ているときにつまむと、デスクトップ環境のランチャーを開きます
   （送るキーやシェルコマンドは自由に設定できます）。画面中央の4つの円が指に合わせて集まったり広がったりし、
   十分にピンチすると塗りつぶされた黄色に変わります。
+- **慣性スクロール。** 二本指で弾くようにスクロールして指を離すと、Mac のようにページが滑り続け、だんだん減速します。
+  タッチパッドに触れれば止まり、そのタッチはクリックになりません。X11 では指を離した瞬間に止まってしまう
+  Chrome などの Chromium 系ブラウザー、VS Code、Zed で有効です。Evince などの GTK 3 アプリは
+  自分で慣性スクロールするので手を出しません。
 - Python スクリプト 1 本。コンパイル不要、root デーモン不要、fusuma や touchegg も不要
 
 macpad-x11 は、ピンチを覚える前は three-finger-drag という名前でした。
@@ -30,7 +34,7 @@ macpad-x11 は、ピンチを覚える前は three-finger-drag という名前�
 - **X11** セッション（Wayland 非対応）
 - Python 3.8 以降（標準ライブラリのみ使用）
 - `libinput`（`libinput debug-events` コマンド。Debian/Ubuntu では `libinput-tools` パッケージ）
-- `libX11`、`libXtst`、`libXext`（Arch: `libx11 libxtst libxext` / Debian・Ubuntu: `libx11-6 libxtst6 libxext6` / Fedora: `libX11 libXtst libXext`）
+- `libX11`、`libXtst`、`libXext`、`libXi`（Arch: `libx11 libxtst libxext libxi` / Debian・Ubuntu: `libx11-6 libxtst6 libxext6 libxi6` / Fedora: `libX11 libXtst libXext libXi`）
 - ユーザーが `input` グループに所属していること（タッチパッドの読み取りと、
   ピンチズーム用の仮想タッチスクリーンの作成に必要）
 
@@ -113,11 +117,15 @@ speed = 3.0        # スワイプ量に対するポインター移動量の倍�
 [pinch]
 enabled = yes
 
+[inertia]
+decay = 0.4        # 慣性スクロールの減速の速さ（秒）
+
 [app Some-app]     # WM_CLASS のクラス名またはインスタンス名。apps.ini より優先
 zoom = wheel
 modifier = ctrl
 step = 1.1
 pan = wheel
+inertia = yes      # 二本指スクロールの後に慣性で滑らせる
 ```
 
 変更は `systemctl --user reload macpad-x11.service` で反映されます。
@@ -186,6 +194,27 @@ tools/make-testdata                 # testdata/ に方眼の文書を生成
 X が仮想の指をマウスのドラッグとして扱ってしまいます。
 アプリを追加するプルリクエストを歓迎します。比較画像 `probe.png` を添付してください。
 
+## 慣性スクロール
+
+X11 には指がタッチパッドから離れたことをアプリに伝える仕組みがないため、ほとんどのアプリは指を離した瞬間にスクロールが止まります。
+GTK 3 アプリはイベントの途切れから推測して自分で慣性スクロールします。それ以外のアプリのために、
+macpad-x11 は素早い二本指スクロールの後、指の速さで仮想ホイールを回し続け、止まるまで減速させます。
+
+対象のアプリは [apps.ini](apps.ini) の `inertia = yes` で決まります（Chrome、Chromium、Brave、Edge、Vivaldi、
+VS Code（Code、code-oss、VSCodium、Cursor）、Zed）。config.ini の `[app ...]` セクションに `inertia = yes` と書けば
+他のアプリにも付けられますが、自分で慣性スクロールするアプリには付けないでください。二重に滑ります。
+`[pinch.default]` に `inertia = yes` と書くと、一覧にないすべてのアプリが対象になります。
+
+タッチパッドに触れる、クリックする、キーを押す、ポインターを動かす、修飾キーを押す（ホイールがズームに化けるため）と止まります。
+滑っている間はタップを無効にしているので、止めるためのタップはクリックになりません。
+ナチュラルスクロールの設定と、タッチパッドの "Scrolling Pixel Distance"（xorg.conf の `ScrollPixelDistance`）に従います。
+
+config.ini の `[inertia]`: `decay` は速度が約 3 分の 1 に落ちるまでの秒数（既定値 0.4）、`speed` は滑り出しの速度の倍率（1.0）、
+`min_speed` はこれより遅いと滑り出さない・止まる速度で、タッチパッドのピクセル毎秒です（100）。
+
+既知の問題: Chrome では、指によるスクロールと慣性の間でページが一瞬止まります。Chrome がこの二つを
+別のデバイスからの別々のスクロールとして扱うためです。Zed と VS Code では途切れずに滑ります。
+
 ## 競合
 
 fusuma、touchegg、libinput-gestures、デスクトップ環境自身のジェスチャーなどで
@@ -222,6 +251,13 @@ macpad-x11 の各機能は、config.ini のそれぞれのセクションで `en
 （ウィンドウが現れると、ウィンドウマネージャーは自分でデスクトップ表示を解除します）。ランチャーのコマンドは
 `sh -c` で、独立したセッションとして実行します。libinput はピンチの指を最大4本として報告するので、五本指のピンチは四本指として扱われます。
 
+**慣性。** libinput は指が離れると二本指スクロールを "scroll stop" イベントで終えます。直前 60ms のスクロールイベントから
+指がまだ動いていたと分かり、ポインターの下のウィンドウが `inertia = yes` のアプリなら、uinput の仮想マウスが
+高解像度ホイールを毎秒 120 回、指数関数的に減速しながら回します。ピクセル距離とナチュラルスクロールの設定は
+タッチパッドの XInput プロパティから読みます。libinput は置いたままの指を報告しないので、タッチパッドのイベントデバイスも
+読んで `BTN_TOUCH` で即座に止めます。滑っている間は "libinput Tapping Enabled" を切り、最後の指が離れて 0.1 秒後に戻します。
+その間にデーモンが落ちても、`$XDG_RUNTIME_DIR` の目印ファイルで次回起動時に元に戻します。
+
 ## トラブルシューティング
 
 ```sh
@@ -230,7 +266,7 @@ journalctl --user -u macpad-x11.service
 ```
 
 ボタンが押されたままになったように見えたら、
-`systemctl --user restart macpad-x11.service` で解放されます。
+`systemctl --user restart macpad-x11.service` で解放されます。タップが無効のまま戻らないときも同じです。
 
 ## ライセンス
 

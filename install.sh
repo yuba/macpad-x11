@@ -34,6 +34,8 @@ check_deps() {
     || die "libXtst is required (e.g. libxtst / libxtst6 / libXtst)"
   python3 -c 'import ctypes; ctypes.cdll.LoadLibrary("libXext.so.6")' 2>/dev/null \
     || die "libXext is required (e.g. libxext / libxext6 / libXext)"
+  python3 -c 'import ctypes; ctypes.cdll.LoadLibrary("libXi.so.6")' 2>/dev/null \
+    || die "libXi is required (e.g. libxi / libxi6 / libXi)"
   if ! id -nG | tr ' ' '\n' | grep -qx input; then
     warn "you are not in the 'input' group; libinput cannot read the touchpad"
     warn "and the virtual touchscreen for pinch zoom cannot be created."

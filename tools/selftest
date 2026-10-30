@@ -24,7 +24,7 @@ class FakePinch:
 
 
 p = FakePinch()
-g["Pinch"].configure(p, conf["pinch"], default_app, apps)
+p.apps = g["Apps"](default_app, apps)
 lookup = g["Pinch"].settings
 for names, zoom in ((("Vivaldi-flatpak", "vivaldi-stable"), "touch"),
                     (("Org.chromium.Chromium", "chromium"), "touch"),
@@ -33,6 +33,14 @@ for names, zoom in ((("Vivaldi-flatpak", "vivaldi-stable"), "touch"),
                     (("Xfce4-terminal", "xfce4-terminal"), "keys")):
     got = lookup(p, names)["zoom"]
     assert got == zoom, (names, got)
+for names, inertia in ((("Google-chrome", "google-chrome"), True),
+                       (("Code", "code"), True),
+                       (("code-oss", "code-oss"), True),
+                       (("dev.zed.Zed", "dev.zed.Zed"), True),
+                       (("Evince", "evince"), False),            # GTK 3 glides by itself
+                       (("Thunar", "thunar"), False)):
+    got = p.apps.lookup(names)["inertia"]
+    assert got is inertia, (names, got)
 
 parse = g["parse"]
 assert parse(" event7   GESTURE_PINCH_UPDATE  12 +1.012s\t2  1.00/ 2.00 ( 0.00/ 0.00 unaccelerated)  1.30 @  0.00") \
@@ -196,5 +204,112 @@ pinch4(p4, 0.5, fingers=2)                 # a two-finger pinch is not ours
 pinch4(p4, 0.5, 1.0)                       # back to where it started before lifting
 assert len(xs.log) == n, xs.log[n:]
 assert abs(g["FourPinch"].progress(type("P", (), {"scale": 0.85, "conf": p4conf})()) - 0.5) < 1e-9
+
+
+class FakeApps:
+    inertia = True
+
+    def at_pointer(self, x):
+        return {"inertia": self.inertia}
+
+
+class FakeWheel:
+    def __init__(self):
+        self.turns = []
+
+    def scroll(self, up, right):
+        self.turns.append((up, right))
+
+    def reset(self):
+        pass
+
+
+class FakeInertiaX:
+    def __init__(self):
+        self.mods = False
+        self.flags = {11: [1]}       # the touchpad's tapping
+        self.log = []
+
+    def pointer_devices(self):
+        return [(11, "Touchpad"), (15, g["Wheel"].NAME)]
+
+    def device_property(self, device, name):
+        if name == "libinput Tapping Enabled":
+            return self.flags.get(device)
+        if name == "libinput Scrolling Pixel Distance":
+            return [50] if device == 11 else None
+        if name == "libinput Natural Scrolling Enabled":
+            return [1] if device == 11 else [0]
+        return None
+
+    def set_device_flags(self, device, name, values):
+        self.flags[device] = list(values)
+        self.log.append((device, values[0]))
+
+    def modifiers(self):
+        return self.mods
+
+
+def make_inertia(tmp):
+    i = object.__new__(g["Inertia"])
+    i.x, i.conf, i.apps, i.wheel = FakeInertiaX(), dict(conf["inertia"]), FakeApps(), FakeWheel()
+    i.touchpads, i.touching, i.recent, i.velocity, i.next_frame = {}, False, [], None, None
+    i.tapping_off, i.tap_at, i.marker = [], None, os.path.join(tmp, "marker")
+    return i
+
+
+def scroll(i, *dys, start=1.0, interval=0.01):
+    for n, dy in enumerate(dys):
+        line = " event6   POINTER_SCROLL_FINGER   +%.3fs\tvert %.2f/0.0* horiz 0.00/0.0 (finger)" % (start + n * interval, dy)
+        i.handle(*parse(line), line)
+    line = " event6   POINTER_SCROLL_FINGER   +%.3fs\tvert 0.00/0.0* horiz 0.00/0.0 (finger)" % (start + len(dys) * interval)
+    i.handle(*parse(line), line)
+
+
+def run(i, seconds):
+    end = time.monotonic() + seconds
+    while i.velocity and time.monotonic() < end:
+        i.tick(i.next_frame)
+
+
+import tempfile
+with tempfile.TemporaryDirectory() as tmp:
+    i = make_inertia(tmp)
+    assert parse(" event6   POINTER_SCROLL_FINGER   +1.000s\tvert 5.00/0.0* horiz 0.00/0.0 (finger)")[0] \
+        == "POINTER_SCROLL_FINGER"
+    scroll(i, *[20.0] * 10)                       # 2000 px/s, lifted while moving: glide
+    assert i.velocity and abs(i.velocity[0] - 2000) < 1e-6, i.velocity
+    assert i.x.flags[11] == [0] and os.path.exists(i.marker), i.x.flags   # tapping off meanwhile
+    run(i, 5)
+    assert not i.velocity
+    up = sum(u for u, _ in i.wheel.turns)
+    # Natural scrolling on: fingers down (positive) turn the wheel up. 2000 px/s
+    # for decay 0.4 s goes about 800 px, 16 clicks of 50 px, 1920 units.
+    assert 1700 < up < 1950, up
+    assert i.x.flags[11] == [0] and i.tap_at                  # back on a moment later
+    i.tick(i.tap_at)
+    assert i.x.flags[11] == [1] and not os.path.exists(i.marker), i.x.flags
+
+    i = make_inertia(tmp)
+    scroll(i, *[20.0] * 10)
+    i.touching = True                             # a touch stops it; tapping stays off
+    i.stop()
+    assert not i.velocity and i.x.flags[11] == [0] and i.tap_at is None
+    i.touching = False                            # until a moment after the lift
+    i.tap_at = time.monotonic()
+    scroll(i, *[20.0] * 10)                       # but a new glide from that scroll keeps it off
+    assert i.velocity and i.tap_at is None and i.x.flags[11] == [0], (i.tap_at, i.x.flags)
+    i.x.mods = True                               # a modifier stops it
+    i.tick(i.next_frame)
+    assert not i.velocity
+
+    i = make_inertia(tmp)
+    scroll(i, *[20.0] * 10 + [0.5] * 8)           # stopped moving before lifting: no glide
+    assert not i.velocity and i.x.log == [], i.x.log
+    scroll(i, 20.0, 20.0)                         # too few events
+    assert not i.velocity
+    i.apps.inertia = False                        # an app without inertia
+    scroll(i, *[20.0] * 10)
+    assert not i.velocity and i.x.log == []
 
 print("selftest passed on Python %d.%d.%d" % sys.version_info[:3])

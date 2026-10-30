@@ -8,6 +8,11 @@ drag   Three-finger drag. A three-finger swipe presses the left button and
        after the fingers are lifted so the drag can be resumed. Any one-finger
        motion, click or scroll during the grace period ends the drag.
 
+inertia
+       Keep scrolling after a quick two-finger scroll, slowing down, like a
+       Mac. Only for the apps that apps.ini or config.ini says
+       (inertia = yes); GTK 3 apps already do it by themselves.
+
 pinch  Pinch to zoom around the pointer. How each application is driven is
        data, not code: apps.ini maps WM_CLASS names to generic methods, and
        config.ini can override them.
@@ -49,7 +54,7 @@ import subprocess
 import time
 import traceback
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 NAME = "macpad-x11"
 
@@ -90,6 +95,17 @@ DEFAULTS = {
         # Move the other way: fingers to the left go to the desktop on the left.
         "reverse": False,
     },
+    "inertia": {
+        "enabled": True,
+        # How fast the scrolling slows down: the time, in seconds, after which
+        # its speed has dropped to about a third.
+        "decay": 0.4,
+        # Speed at the start, relative to the fingers' speed when lifted.
+        "speed": 1.0,
+        # Scrolling slower than this, in touchpad pixels per second, does not
+        # glide on or stops.
+        "min_speed": 100.0,
+    },
     "pinch4": {
         "enabled": True,
         # Number of fingers. libinput reports at most four for a pinch.
@@ -122,7 +138,7 @@ DEFAULTS = {
     },
 }
 
-# Per-app pinch settings, used where neither apps.ini nor config.ini says otherwise.
+# Per-app settings, used where neither apps.ini nor config.ini says otherwise.
 APP_DEFAULTS = {
     "zoom": "keys",
     # Modifier held during zoom wheel clicks.
@@ -138,6 +154,9 @@ APP_DEFAULTS = {
     # Apply the entry only if the app's process has this environment
     # variable ("NAME=VALUE", or "NAME" for any value); "" for always.
     "requires_env": "",
+    # Keep scrolling after a quick two-finger scroll. Off for apps that glide
+    # by themselves (GTK 3), or they would glide twice.
+    "inertia": False,
 }
 
 CHOICES = {
@@ -161,6 +180,10 @@ RELEASE_EVENTS = {
 DELTA_RE = re.compile(r"(-?\d+\.\d+)/\s*(-?\d+\.\d+)")
 # Trailing "scale @ angle" of GESTURE_PINCH_UPDATE.
 SCALE_RE = re.compile(r"(\d+\.\d+)\s+@\s+-?\d+\.\d+\s*$")
+# "vert dy/v120 horiz dx/h120" of POINTER_SCROLL_*; "*" marks the axes the event has.
+SCROLL_RE = re.compile(r"vert\s+(-?\d+\.\d+)/\S*?(\*?)\s+horiz\s+(-?\d+\.\d+)/\S*?(\*?)\s")
+# The event's time ("+1.234s"), in seconds.
+TIME_RE = re.compile(r"\s\+(\d+\.\d+)s\s")
 
 
 def warn(msg):
@@ -334,6 +357,34 @@ xtst.XTestFakeRelativeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, cty
 X_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)(lambda d, e: 0)
 x11.XSetErrorHandler(X_ERROR_HANDLER)
 
+# libXi comes with libXtst; it reads the touchpad's scroll settings.
+try:
+    xi = ctypes.cdll.LoadLibrary("libXi.so.6")
+except OSError:
+    xi = None
+
+
+class XIDeviceInfo(ctypes.Structure):
+    _fields_ = [("deviceid", ctypes.c_int), ("name", ctypes.c_char_p), ("use", ctypes.c_int),
+                ("attachment", ctypes.c_int), ("enabled", ctypes.c_int), ("num_classes", ctypes.c_int),
+                ("classes", ctypes.c_void_p)]
+
+
+XI_ALL_DEVICES, XI_SLAVE_POINTER = 0, 3
+XA_STRING, XA_INTEGER = 31, 19
+PROP_MODE_REPLACE = 0
+if xi:
+    xi.XIQueryVersion.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+    xi.XIQueryDevice.restype = ctypes.POINTER(XIDeviceInfo)
+    xi.XIQueryDevice.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    xi.XIFreeDeviceInfo.argtypes = [ctypes.POINTER(XIDeviceInfo)]
+    xi.XIChangeProperty.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    xi.XIGetProperty.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ulong, ctypes.c_long, ctypes.c_long,
+                                 ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong),
+                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong),
+                                 ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
+
 class XClientMessageEvent(ctypes.Structure):
     _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
                 ("display", ctypes.c_void_p), ("window", Window), ("message_type", ctypes.c_ulong),
@@ -403,6 +454,7 @@ xext = ctypes.cdll.LoadLibrary("libXext.so.6")
 xext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, Window, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                          ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
+SHIFT_MASK, CONTROL_MASK, MOD1_MASK, MOD4_MASK = 1 << 0, 1 << 2, 1 << 3, 1 << 6
 MODIFIER_KEYSYMS = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L", "super": "Super_L"}
 
 
@@ -415,6 +467,8 @@ class X:
         self.screen = x11.XDefaultScreen(self.dpy)
         self.width = x11.XDisplayWidth(self.dpy, self.screen)
         self.height = x11.XDisplayHeight(self.dpy, self.screen)
+        major, minor = ctypes.c_int(2), ctypes.c_int(0)
+        self.xi2 = bool(xi) and xi.XIQueryVersion(self.dpy, ctypes.byref(major), ctypes.byref(minor)) == 0
 
     def flush(self):
         x11.XFlush(self.dpy)
@@ -482,6 +536,63 @@ class X:
         x11.XQueryPointer(self.dpy, self.root, ctypes.byref(root), ctypes.byref(child),
                           ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
         return rx.value, ry.value, self._client(child.value, 3) if child.value else 0
+
+    def modifiers(self):
+        """Whether Shift, Ctrl, Alt or Super is held."""
+        root, child = Window(), Window()
+        rx, ry, wx, wy = (ctypes.c_int() for _ in range(4))
+        mask = ctypes.c_uint()
+        x11.XQueryPointer(self.dpy, self.root, ctypes.byref(root), ctypes.byref(child),
+                          ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
+        return bool(mask.value & (SHIFT_MASK | CONTROL_MASK | MOD1_MASK | MOD4_MASK))
+
+    def pointer_devices(self):
+        """Return [(id, name)] of the pointer devices, physical and virtual (XInput 2)."""
+        if not self.xi2:
+            return []
+        n = ctypes.c_int()
+        info = xi.XIQueryDevice(self.dpy, XI_ALL_DEVICES, ctypes.byref(n))
+        if not info:
+            return []
+        try:
+            return [(info[i].deviceid, (info[i].name or b"").decode(errors="replace"))
+                    for i in range(n.value) if info[i].use == XI_SLAVE_POINTER]
+        finally:
+            xi.XIFreeDeviceInfo(info)
+
+    def device_property(self, device, name):
+        """Return the values of an XInput 2 device property (a str for a string), or None."""
+        atom = x11.XInternAtom(self.dpy, name.encode(), True)
+        if not self.xi2 or not atom:
+            return None
+        actual_type, actual_format = ctypes.c_ulong(), ctypes.c_int()
+        nitems, after, data = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_void_p()
+        if xi.XIGetProperty(self.dpy, device, atom, 0, 64, False, 0, ctypes.byref(actual_type),
+                            ctypes.byref(actual_format), ctypes.byref(nitems), ctypes.byref(after),
+                            ctypes.byref(data)) != 0:
+            return None
+        try:
+            if not data.value:
+                return None
+            if actual_format.value == 8:
+                raw = ctypes.string_at(data, nitems.value)
+                return raw.rstrip(b"\0").decode(errors="replace") if actual_type.value == XA_STRING else list(raw)
+            # Unlike core window properties, XInput 2 hands format-32 items back as 32 bits.
+            ctype = {16: ctypes.c_int16, 32: ctypes.c_int32}.get(actual_format.value)
+            if ctype is None:
+                return None
+            values = ctypes.cast(data, ctypes.POINTER(ctype))
+            return [values[i] for i in range(nitems.value)]
+        finally:
+            if data.value:
+                x11.XFree(data)
+
+    def set_device_flags(self, device, name, values):
+        """Set an 8-bit XInput 2 device property, like "libinput Tapping Enabled"."""
+        atom = x11.XInternAtom(self.dpy, name.encode(), True)
+        if self.xi2 and atom:
+            xi.XIChangeProperty(self.dpy, device, atom, XA_INTEGER, 8, PROP_MODE_REPLACE, bytes(values), len(values))
+            self.flush()
 
     def _client(self, win, depth):
         # The child of the root is usually the window manager's frame; the
@@ -650,6 +761,60 @@ class Touchscreen:
 
     def close(self):
         self.lift()
+        fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+        os.close(self.fd)
+
+
+EV_REL = 0x02
+REL_X, REL_Y, REL_HWHEEL, REL_WHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES = 0x00, 0x01, 0x06, 0x08, 0x0B, 0x0C
+BTN_LEFT = 0x110
+UI_SET_RELBIT = 0x40045566
+
+
+class Wheel:
+    """A uinput mouse that only ever turns its high-resolution wheels (120 units a click)."""
+    NAME = f"{NAME} virtual wheel"
+
+    def __init__(self):
+        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        for ev in (EV_SYN, EV_KEY, EV_REL):
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, ev)
+        # Motion and a button too, or udev and libinput do not take it for a mouse.
+        fcntl.ioctl(self.fd, UI_SET_KEYBIT, BTN_LEFT)
+        for code in (REL_X, REL_Y, REL_WHEEL, REL_HWHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES):
+            fcntl.ioctl(self.fd, UI_SET_RELBIT, code)
+        fcntl.ioctl(self.fd, UI_DEV_SETUP, struct.pack("HHHH80sI", 0x06, 0x1234, 0x5679, 1, self.NAME.encode(), 0))
+        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+        # Sub-unit remainders, and units towards the next whole click.
+        self.rest = [0.0, 0.0]
+        self.clicks = [0, 0]
+
+    def scroll(self, up, right):
+        """Turn the wheels by up and right units (negative: down, left)."""
+        events = []
+        for axis, (amount, hi_res, lo_res) in enumerate(((up, REL_WHEEL_HI_RES, REL_WHEEL),
+                                                         (right, REL_HWHEEL_HI_RES, REL_HWHEEL))):
+            self.rest[axis] += amount
+            units = int(self.rest[axis])
+            if not units:
+                continue
+            self.rest[axis] -= units
+            events.append((EV_REL, hi_res, units))
+            # Clients that only know whole clicks get one every 120 units.
+            self.clicks[axis] += units
+            whole = int(self.clicks[axis] / 120)
+            if whole:
+                self.clicks[axis] -= whole * 120
+                events.append((EV_REL, lo_res, whole))
+        if events:
+            os.write(self.fd, b"".join(struct.pack("llHHi", 0, 0, t, c, v) for t, c, v in events)
+                     + struct.pack("llHHi", 0, 0, EV_SYN, 0, 0))
+
+    def reset(self):
+        self.rest = [0.0, 0.0]
+        self.clicks = [0, 0]
+
+    def close(self):
         fcntl.ioctl(self.fd, UI_DEV_DESTROY)
         os.close(self.fd)
 
@@ -933,27 +1098,20 @@ def has_env(pid, requirement):
     return any(e.startswith(want + b"=") and len(e) > len(want) + 1 for e in env)
 
 
-class Pinch:
-    def __init__(self, x, conf, default_app, apps):
-        self.x = x
-        self.configure(conf, default_app, apps)
-        try:
-            self.touch = Touchscreen(x.width, x.height)
-        except OSError as e:
-            warn(f"cannot create the virtual touchscreen ({e}); zoom = \"touch\" falls back to \"keys\". "
-                 "Is the user in the 'input' group?")
-            self.touch = None
-        # Settings of the app being pinched, or None between pinches.
-        self.app = None
+class Apps:
+    """Per-app settings by WM_CLASS: apps.ini, overridden by config.ini."""
 
-    def configure(self, conf, default_app, apps):
-        self.conf, self.default_app, self.apps = conf, default_app, apps
+    def __init__(self, default_app, apps):
+        self.configure(default_app, apps)
+
+    def configure(self, default_app, apps):
+        self.default_app, self.apps = default_app, apps
         self.apps_folded = {key.lower(): table for key, table in apps.items()}
         # Keys like "vivaldi*" cover the names an app gets from different
         # packagings (Vivaldi-stable, Vivaldi-flatpak, ...).
         self.apps_globbed = [(key.lower(), table) for key, table in apps.items() if any(c in key for c in "*?[")]
 
-    def settings(self, names, pid=None):
+    def lookup(self, names, pid=None):
         # The class name first, then the instance name (some toolkits use a
         # generic class, e.g. "dotnet"): exactly, ignoring case, then by glob.
         names = [n for n in names if n]
@@ -966,7 +1124,28 @@ class Pinch:
         # variable; without it, they get the default instead.
         if table.get("requires_env") and not has_env(pid, table["requires_env"]):
             table = {}
-        app = {**self.default_app, **table}
+        return {**self.default_app, **table}
+
+    def at_pointer(self, x):
+        """The settings of the app under the pointer."""
+        _, _, win = x.pointer()
+        return self.lookup(x.names(win) or ("", ""), x.pid(win))
+
+
+class Pinch:
+    def __init__(self, x, conf, apps):
+        self.x, self.conf, self.apps = x, conf, apps
+        try:
+            self.touch = Touchscreen(x.width, x.height)
+        except OSError as e:
+            warn(f"cannot create the virtual touchscreen ({e}); zoom = \"touch\" falls back to \"keys\". "
+                 "Is the user in the 'input' group?")
+            self.touch = None
+        # Settings of the app being pinched, or None between pinches.
+        self.app = None
+
+    def settings(self, names, pid=None):
+        app = self.apps.lookup(names, pid)
         if app["zoom"] == "touch" and not self.touch:
             app["zoom"] = "keys"
         return app
@@ -1251,6 +1430,220 @@ class FourPinch:
             self.hud.close()
 
 
+class Inertia:
+    """Keep scrolling after a quick two-finger scroll, slowing down, like a Mac.
+
+    libinput ends a two-finger scroll with a "scroll stop" event (zero on the
+    axes) when the fingers are lifted. If they were still moving, a virtual
+    wheel goes on scrolling the window under the pointer at their speed, and
+    slows down exponentially. X has no scroll stop for apps, so most of them
+    stop dead; GTK 3 guesses it from a pause in the events and glides by
+    itself, so this is only for apps whose settings say inertia = yes.
+
+    Touching the touchpad again stops the gliding at once: libinput reports
+    nothing for fingers that rest, so the touchpads' event devices are read
+    for that. So does any click, key, pointer motion or gesture, and holding
+    a modifier, which would turn the wheel into zoom or sideways scrolling.
+
+    A tap that stops the gliding must not click, as on a Mac. X cannot be
+    kept from seeing it short of grabbing the touchpad, so tapping is turned
+    off while gliding and back on a moment after the stopping touch is
+    lifted. It is switched only while no finger is down, so that gestures
+    started during the gliding (swipes, pinches, a new scroll) go on as
+    usual. A marker file brings tapping back if the daemon died meanwhile.
+    """
+    # Time between two wheel turns, in seconds.
+    FRAME = 1 / 120
+    # The finger scroll events this close to the lift give the speed, in seconds.
+    WINDOW = 0.06
+    STOP_EVENTS = {"POINTER_MOTION", "POINTER_BUTTON", "KEYBOARD_KEY", "GESTURE_SWIPE_BEGIN",
+                   "GESTURE_PINCH_BEGIN", "GESTURE_HOLD_BEGIN"}
+    # Tapping comes back this long after the last finger is lifted, in
+    # seconds, so that the X server has seen the lift with tapping still off.
+    TAP_DELAY = 0.1
+    TAPPING = "libinput Tapping Enabled"
+
+    def __init__(self, x, conf, apps):
+        self.x, self.conf, self.apps = x, conf, apps
+        self.wheel = Wheel()
+        # The touchpads' event devices, by file descriptor.
+        self.touchpads = {}
+        for device, _ in x.pointer_devices():
+            node = x.device_property(device, "Device Node")
+            if isinstance(node, str) and x.device_property(device, "libinput Tapping Enabled") is not None:
+                try:
+                    self.touchpads[os.open(node, os.O_RDONLY | os.O_NONBLOCK)] = node
+                except OSError as e:
+                    warn(f"cannot read {node} ({e}); touching the touchpad does not stop the scrolling")
+        self.touching = False
+        # (time, vertical, horizontal) of the finger scroll so far.
+        self.recent = []
+        # Speed (vertical, horizontal) in touchpad pixels per second while gliding.
+        self.velocity = None
+        self.next_frame = None
+        # Touchpads whose tapping is off, and when to turn it back on.
+        self.tapping_off = []
+        self.tap_at = None
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/{NAME}-{os.getuid()}"
+        self.marker = os.path.join(runtime, f"{NAME}.tapping-off")
+        self.recover()
+
+    def recover(self):
+        """Turn tapping back on for the touchpads a previous run left it off for."""
+        try:
+            with open(self.marker, encoding="utf-8") as f:
+                names = set(f.read().splitlines())
+        except OSError:
+            return
+        for device, name in self.x.pointer_devices():
+            if name in names:
+                self.x.set_device_flags(device, self.TAPPING, [1])
+        os.remove(self.marker)
+
+    def tapping(self, on):
+        if not on:
+            touchpads = [(d, n) for d, n in self.x.pointer_devices() if self.x.device_property(d, self.TAPPING) == [1]]
+            if not touchpads:
+                return
+            try:
+                with open(self.marker, "w", encoding="utf-8") as f:
+                    f.write("".join(n + "\n" for _, n in touchpads))
+            except OSError:
+                pass
+            for device, _ in touchpads:
+                self.x.set_device_flags(device, self.TAPPING, [0])
+            self.tapping_off = [d for d, _ in touchpads]
+        elif self.tapping_off:
+            for device in self.tapping_off:
+                self.x.set_device_flags(device, self.TAPPING, [1])
+            self.tapping_off = []
+            try:
+                os.remove(self.marker)
+            except OSError:
+                pass
+        self.tap_at = None
+
+    def fds(self):
+        return list(self.touchpads)
+
+    def read(self, fd):
+        try:
+            data = os.read(fd, 24 * 64)
+        except BlockingIOError:
+            return
+        except OSError:
+            # The touchpad is gone.
+            os.close(fd)
+            del self.touchpads[fd]
+            return
+        for i in range(0, len(data) - 23, 24):
+            _, _, kind, code, value = struct.unpack_from("llHHi", data, i)
+            if kind == EV_KEY and code == BTN_TOUCH:
+                self.touching = value != 0
+                if self.touching:
+                    self.stop()
+                    self.tap_at = None
+                elif self.tapping_off and not self.velocity:
+                    self.tap_at = time.monotonic() + self.TAP_DELAY
+
+    def deadline(self):
+        times = [t for t in (self.next_frame if self.velocity else None, self.tap_at) if t is not None]
+        return min(times) if times else None
+
+    def handle(self, event, fingers, line):
+        if event == "POINTER_SCROLL_FINGER":
+            m, t = SCROLL_RE.search(line), TIME_RE.search(line)
+            if not m or not t:
+                return
+            t = float(t.group(1))
+            vert = float(m.group(1)) if m.group(2) else 0.0
+            horiz = float(m.group(3)) if m.group(4) else 0.0
+            if vert == 0 and horiz == 0:
+                self.fling(t)
+                self.recent = []
+            else:
+                self.stop()
+                self.recent = [e for e in self.recent if e[0] >= t - self.WINDOW] + [(t, vert, horiz)]
+        elif event in self.STOP_EVENTS:
+            self.stop()
+
+    def fling(self, t):
+        """Glide on after the fingers were lifted at libinput time t, if they were moving."""
+        moving = [e for e in self.recent if e[0] >= t - self.WINDOW]
+        if len(moving) < 3 or self.touching:
+            return
+        span = moving[-1][0] - moving[0][0]
+        if span <= 0:
+            return
+        # The first event's movement happened before the window starts.
+        speed = self.conf["speed"] / span
+        velocity = [sum(e[1] for e in moving[1:]) * speed, sum(e[2] for e in moving[1:]) * speed]
+        if math.hypot(*velocity) < self.conf["min_speed"] or not self.apps.at_pointer(self.x)["inertia"]:
+            return
+        self.units = self.wheel_units()
+        self.tapping(False)
+        # The lift that ended this scroll may have just asked for tapping back.
+        self.tap_at = None
+        self.velocity = velocity
+        self.wheel.reset()
+        self.last = time.monotonic()
+        self.next_frame = self.last + self.FRAME
+
+    def wheel_units(self):
+        """Wheel units per touchpad pixel, negative if the wheel turns the other way round."""
+        # The X driver scrolls one wheel click for every "Scrolling Pixel
+        # Distance" of finger movement (15 by default). libinput debug-events
+        # does not know about natural scrolling set in X, so take it from the
+        # touchpad, and from the virtual wheel in case it got it too.
+        distance, natural = 15, False
+        for device, name in self.x.pointer_devices():
+            flag = self.x.device_property(device, "libinput Natural Scrolling Enabled")
+            if name == Wheel.NAME:
+                natural ^= bool(flag and flag[0])
+            elif self.x.device_property(device, "libinput Tapping Enabled") is not None:
+                pixels = self.x.device_property(device, "libinput Scrolling Pixel Distance")
+                if pixels and pixels[0] > 0:
+                    distance = pixels[0]
+                natural ^= bool(flag and flag[0])
+        return 120 / distance * (-1 if natural else 1)
+
+    def tick(self, now):
+        if self.tap_at is not None and now >= self.tap_at and not self.touching:
+            self.tapping(True)
+        if not self.velocity or now < self.next_frame:
+            return
+        if self.x.modifiers():
+            self.stop()
+            return
+        dt, self.last = now - self.last, now
+        tau = max(self.conf["decay"], 0.01)
+        decay = math.exp(-dt / tau)
+        # How far exponentially slowing scrolling goes in dt.
+        travel = tau * (1 - decay)
+        dv, dh = (v * travel for v in self.velocity)
+        # libinput's vertical axis points down, the wheel's up.
+        self.wheel.scroll(-dv * self.units, dh * self.units)
+        self.velocity = [v * decay for v in self.velocity]
+        if math.hypot(*self.velocity) < self.conf["min_speed"]:
+            self.stop()
+        else:
+            self.next_frame = now + self.FRAME
+
+    def stop(self):
+        if self.velocity and not self.touching:
+            # Stopped by something else than a touch: no tap to swallow.
+            self.tap_at = time.monotonic() + self.TAP_DELAY
+        self.velocity = self.next_frame = None
+
+    def close(self):
+        self.stop()
+        self.tapping(True)
+        for fd in self.touchpads:
+            os.close(fd)
+        self.touchpads = {}
+        self.wheel.close()
+
+
 # --- main -------------------------------------------------------------------
 
 if len(sys.argv) > 1:
@@ -1267,7 +1660,17 @@ if os.environ.get("XDG_SESSION_TYPE") == "wayland":
 conf, default_app, apps = load_config()
 display = X()
 drag = Drag(display, conf["drag"]) if conf["drag"]["enabled"] else None
-pinch = Pinch(display, conf["pinch"], default_app, apps) if conf["pinch"]["enabled"] else None
+app_settings = Apps(default_app, apps)
+pinch = Pinch(display, conf["pinch"], app_settings) if conf["pinch"]["enabled"] else None
+inertia = None
+if conf["inertia"]["enabled"] and not display.xi2:
+    warn("XInput 2 (libXi) is missing; scrolling does not glide on")
+elif conf["inertia"]["enabled"]:
+    try:
+        inertia = Inertia(display, conf["inertia"], app_settings)
+    except OSError as e:
+        warn(f"cannot create the virtual wheel ({e}); scrolling does not glide on. "
+             "Is the user in the 'input' group?")
 swipe = None
 if conf["swipe"]["enabled"]:
     if drag and conf["swipe"]["fingers"] == conf["drag"]["fingers"]:
@@ -1280,7 +1683,7 @@ if conf["pinch4"]["enabled"]:
         warn("[pinch4] uses 2 fingers like [pinch]; the four-finger pinch is off")
     else:
         pinch4 = FourPinch(display, conf["pinch4"], FingerHud(display) if conf["pinch4"]["hud"] else None)
-features = [f for f in (drag, pinch, swipe, pinch4) if f]
+features = [f for f in (drag, pinch, swipe, pinch4, inertia) if f]
 failed = set()
 
 
@@ -1298,7 +1701,7 @@ def dispatch(line):
                 warn(f"error in {type(f).__name__.lower()}:\n{traceback.format_exc()}")
 
 
-def shutdown(*_):
+def close_all():
     if drag:
         drag.release()
     if pinch:
@@ -1307,6 +1710,12 @@ def shutdown(*_):
         swipe.close()
     if pinch4:
         pinch4.close()
+    if inertia:
+        inertia.close()
+
+
+def shutdown(*_):
+    close_all()
     sys.exit(0)
 
 
@@ -1314,13 +1723,15 @@ def reload(*_):
     new_conf, new_default, new_apps = load_config()
     if drag:
         drag.conf = new_conf["drag"]
+    app_settings.configure(new_default, new_apps)
     if pinch:
         pinch.conf = new_conf["pinch"]
-        pinch.configure(new_conf["pinch"], new_default, new_apps)
     if swipe:
         swipe.conf = new_conf["swipe"]
     if pinch4:
         pinch4.conf = new_conf["pinch4"]
+    if inertia:
+        inertia.conf = new_conf["inertia"]
 
 
 signal.signal(signal.SIGTERM, shutdown)
@@ -1338,26 +1749,25 @@ libinput = subprocess.Popen(
 fd = libinput.stdout.fileno()
 buf = b""
 
-timed = [f for f in (drag, swipe, pinch4) if f]
+timed = [f for f in (drag, swipe, pinch4, inertia) if f]
 while True:
     deadlines = [d for d in (f.deadline() for f in timed) if d is not None]
     wait = max(0.0, min(deadlines) - time.monotonic()) if deadlines else None
-    ready, _, _ = select.select([fd], [], [], wait)
+    # The touchpads' own event devices, for touches that libinput does not report.
+    touchpad_fds = inertia.fds() if inertia else []
+    ready, _, _ = select.select([fd, *touchpad_fds], [], [], wait)
+    # Before libinput's events: a touch that came first must stop gliding first.
+    for t in ready:
+        if t != fd:
+            inertia.read(t)
     for f in timed:
         f.tick(time.monotonic())
-    if not ready:
+    if fd not in ready:
         continue
     chunk = os.read(fd, 65536)
     if not chunk:
         # libinput exited (e.g. no permission on /dev/input); let systemd restart us.
-        if drag:
-            drag.release()
-        if pinch:
-            pinch.close()
-        if swipe:
-            swipe.close()
-        if pinch4:
-            pinch4.close()
+        close_all()
         sys.exit(f"{NAME}: libinput debug-events exited (is the user in the 'input' group?)")
     *lines, buf = (buf + chunk).split(b"\n")
     for line in lines:

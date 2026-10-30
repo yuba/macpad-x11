@@ -1,12 +1,12 @@
 # Maintainer: yuba <m.takuma@gmail.com>
 pkgname=macpad-x11
-pkgver=0.5.1
+pkgver=0.6.0
 pkgrel=1
-pkgdesc="macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching, show desktop and launcher"
+pkgdesc="macOS-style touchpad gestures for X11: three-finger drag, pinch zoom around the pointer, four-finger desktop switching, show desktop and launcher, inertial scrolling"
 arch=('any')
 url="https://github.com/yuba/macpad-x11"
 license=('MIT')
-depends=('python>=3.8' 'libinput' 'libx11' 'libxtst' 'libxext' 'coreutils')
+depends=('python>=3.8' 'libinput' 'libx11' 'libxtst' 'libxext' 'libxi' 'coreutils')
 provides=('three-finger-drag')
 conflicts=('three-finger-drag')
 replaces=('three-finger-drag')

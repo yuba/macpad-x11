@@ -27,6 +27,11 @@ macOS-style touchpad gestures for Linux on X11.
   desktop's launcher (any keys or shell command you like). Four circles in
   the middle of the screen gather or spread with your fingers and turn
   solid yellow once the pinch is far enough.
+- **Inertial scrolling.** Flick two fingers and let go: the page glides on
+  and slows down, like on a Mac. Touch the touchpad to stop it; that touch
+  does not click. On for Chrome and the other Chromium browsers, VS Code
+  and Zed, which stop dead on X11; GTK 3 apps such as Evince glide by
+  themselves and are left alone.
 - One small Python script. No compilation, no root daemon, no fusuma or
   touchegg needed.
 
@@ -38,11 +43,11 @@ macpad-x11 was called three-finger-drag before it learned to pinch.
 - Python 3.8 or later (standard library only)
 - `libinput` (the `libinput debug-events` command — on Debian/Ubuntu it is in
   the `libinput-tools` package)
-- `libX11`, `libXtst` and `libXext` (`libx11 libxtst libxext` on Arch,
-  `libx11-6 libxtst6 libxext6` on Debian/Ubuntu, `libX11 libXtst libXext` on
-  Fedora)
+- `libX11`, `libXtst`, `libXext` and `libXi` (`libx11 libxtst libxext libxi`
+  on Arch, `libx11-6 libxtst6 libxext6 libxi6` on Debian/Ubuntu,
+  `libX11 libXtst libXext libXi` on Fedora)
 - Your user in the `input` group (to read the touchpad and to create the
-  virtual touchscreen used for pinch zoom):
+  virtual touchscreen and wheel used for pinch zoom and inertial scrolling):
 
   ```sh
   sudo gpasswd -a "$USER" input   # then log out and back in
@@ -127,11 +132,15 @@ speed = 3.0        # pointer movement per unit of swipe movement
 [pinch]
 enabled = yes
 
+[inertia]
+decay = 0.4        # how fast gliding slows down (s)
+
 [app Some-app]     # WM_CLASS class or instance name; overrides apps.ini
 zoom = wheel
 modifier = ctrl
 step = 1.1
 pan = wheel
+inertia = yes      # glide on after a two-finger scroll
 ```
 
 Apply changes with `systemctl --user reload macpad-x11.service`.
@@ -208,6 +217,36 @@ app that does not zoom on touchscreen pinches — X then turns the virtual
 fingers into a mouse drag. Pull requests that add apps are very welcome —
 please attach the `probe.png` contact sheet.
 
+## Inertial scrolling
+
+X11 cannot tell apps that the fingers left the touchpad, so most apps stop
+scrolling the moment you lift them. GTK 3 apps guess it from a pause in the
+events and glide on by themselves; for the others, macpad-x11 keeps turning
+a virtual wheel after a quick two-finger scroll, at the speed of your
+fingers, slowing down until it stops.
+
+Which apps get it is in [apps.ini](apps.ini) (`inertia = yes`): Chrome,
+Chromium, Brave, Edge, Vivaldi, VS Code (Code, code-oss, VSCodium, Cursor)
+and Zed. Give it to an app in config.ini with `inertia = yes` in its
+`[app ...]` section — but not to an app that glides by itself, or it glides
+twice. `inertia = yes` under `[pinch.default]` gives it to every app that is
+not listed.
+
+The gliding stops when you touch the touchpad, click, press a key, move the
+pointer or hold a modifier (which would turn the wheel into zoom).
+Tapping is turned off while it glides, so the tap that stops it does not
+click. It follows your natural scrolling setting and the touchpad's
+"Scrolling Pixel Distance" (`ScrollPixelDistance` in xorg.conf).
+
+`[inertia]` in config.ini: `decay` is the time in seconds after which the
+speed has dropped to about a third (default 0.4), `speed` scales the speed
+at the start (1.0), and `min_speed` is the speed in touchpad pixels per
+second below which it does not start or stops (100).
+
+Known issue: in Chrome, the page pauses for a moment between your fingers
+and the gliding, as Chrome treats them as two scrolls from different
+devices. Zed and VS Code glide on seamlessly.
+
 ## Conflicts
 
 Disable other bindings for three- and four-finger swipes and two- and
@@ -258,6 +297,18 @@ desktop" by itself when a window appears). The launcher command runs with
 `sh -c`, in its own session. libinput reports at most four fingers for a
 pinch, so a five-finger pinch counts as four.
 
+**Inertia.** libinput ends a two-finger scroll with a "scroll stop" event
+when the fingers are lifted. If the scroll events of the last 60 ms show
+the fingers still moving and the window under the pointer is an app with
+`inertia = yes`, a uinput mouse turns its high-resolution wheels 120 times
+a second, slowing down exponentially. The pixel distance and the natural
+scrolling setting come from the touchpad's XInput properties. libinput
+reports nothing for a finger that rests, so the daemon also reads the
+touchpad's event device for `BTN_TOUCH`, which stops the gliding at once.
+"libinput Tapping Enabled" is off while gliding and comes back 0.1 s after
+the last finger is lifted; a marker file in `$XDG_RUNTIME_DIR` turns it
+back on should the daemon die meanwhile.
+
 ## Troubleshooting
 
 ```sh
@@ -266,7 +317,7 @@ journalctl --user -u macpad-x11.service
 ```
 
 If the button ever seems stuck, `systemctl --user restart macpad-x11.service`
-releases it.
+releases it. The same brings tapping back if it ever stays off.
 
 ## License
 
