@@ -29,8 +29,8 @@ macOS-style touchpad gestures for Linux on X11.
   solid yellow once the pinch is far enough.
 - **Inertial scrolling.** Flick two fingers and let go: the page glides on
   and slows down, like on a Mac. Touch the touchpad to stop it; that touch
-  does not click. On for Chrome and the other Chromium browsers, VS Code
-  and Zed, which stop dead on X11; GTK 3 apps such as Evince glide by
+  does not click. On for Chrome and the other Chromium browsers, VS Code,
+  Zed and most terminals, which stop dead on X11; GTK 3 apps such as Evince glide by
   themselves and are left alone.
 - One small Python script. No compilation, no root daemon, no fusuma or
   touchegg needed.
@@ -226,8 +226,9 @@ a virtual wheel after a quick two-finger scroll, at the speed of your
 fingers, slowing down until it stops.
 
 Which apps get it is in [apps.ini](apps.ini) (`inertia = yes`): Chrome,
-Chromium, Brave, Edge, Vivaldi, VS Code (Code, code-oss, VSCodium, Cursor)
-and Zed. Give it to an app in config.ini with `inertia = yes` in its
+Chromium, Brave, Edge, Vivaldi, VS Code (Code, code-oss, VSCodium, Cursor),
+Zed, and terminals (Guake, Xfce Terminal, GNOME Terminal, Konsole, kitty,
+Alacritty, WezTerm, XTerm and more; GTK 4 ones are left out until checked). Give it to an app in config.ini with `inertia = yes` in its
 `[app ...]` section — but not to an app that glides by itself, or it glides
 twice. `inertia = yes` under `[pinch.default]` gives it to every app that is
 not listed.

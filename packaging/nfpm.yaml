@@ -15,7 +15,7 @@ description: |-
   macOS-style touchpad gestures for X11
   Three-finger drag, pinch to zoom around the pointer in browsers,
   document and image viewers and graphics apps, four-finger swipes
-  between desktops, and inertial scrolling in Chromium, VS Code and Zed.
+  between desktops, and inertial scrolling in Chromium, VS Code, Zed and terminals.
 vendor: yuba
 homepage: https://github.com/yuba/macpad-x11
 license: MIT

@@ -23,7 +23,7 @@ X11 上の Linux タッチパッドで、macOS のようなジェスチャーを
   十分にピンチすると塗りつぶされた黄色に変わります。
 - **慣性スクロール。** 二本指で弾くようにスクロールして指を離すと、Mac のようにページが滑り続け、だんだん減速します。
   タッチパッドに触れれば止まり、そのタッチはクリックになりません。X11 では指を離した瞬間に止まってしまう
-  Chrome などの Chromium 系ブラウザー、VS Code、Zed で有効です。Evince などの GTK 3 アプリは
+  Chrome などの Chromium 系ブラウザー、VS Code、Zed、ほとんどの端末で有効です。Evince などの GTK 3 アプリは
   自分で慣性スクロールするので手を出しません。
 - Python スクリプト 1 本。コンパイル不要、root デーモン不要、fusuma や touchegg も不要
 
@@ -201,7 +201,7 @@ GTK 3 アプリはイベントの途切れから推測して自分で慣性ス�
 macpad-x11 は素早い二本指スクロールの後、指の速さで仮想ホイールを回し続け、止まるまで減速させます。
 
 対象のアプリは [apps.ini](apps.ini) の `inertia = yes` で決まります（Chrome、Chromium、Brave、Edge、Vivaldi、
-VS Code（Code、code-oss、VSCodium、Cursor）、Zed）。config.ini の `[app ...]` セクションに `inertia = yes` と書けば
+VS Code（Code、code-oss、VSCodium、Cursor）、Zed、端末（Guake、Xfce Terminal、GNOME Terminal、Konsole、kitty、Alacritty、WezTerm、XTerm など。GTK 4 のものは確認するまで除外））。config.ini の `[app ...]` セクションに `inertia = yes` と書けば
 他のアプリにも付けられますが、自分で慣性スクロールするアプリには付けないでください。二重に滑ります。
 `[pinch.default]` に `inertia = yes` と書くと、一覧にないすべてのアプリが対象になります。
 
